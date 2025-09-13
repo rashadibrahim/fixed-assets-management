@@ -5,18 +5,18 @@ from .models import db, Warehouse, Branch
 class BranchSchema(Schema):
     id = fields.Int(dump_only=True)
     name_ar = fields.Str(required=True)
-    name_en = fields.Str()
-    address_ar = fields.Str()
-    address_en = fields.Str()
+    name_en = fields.Str(required=True)
+    address_ar = fields.Str(required=True)
+    address_en = fields.Str(required=True)
 
 
 class WarehouseSchema(Schema):
     id = fields.Int(dump_only=True)
     branch_id = fields.Int()
     name_ar = fields.Str(required=True)
-    name_en = fields.Str()
-    address_ar = fields.Str()
-    address_en = fields.Str()
+    name_en = fields.Str(required=True)
+    address_ar = fields.Str(required=True)
+    address_en = fields.Str(required=True)
     @validates("branch_id")
     def validate_branch(self, value, **kwargs):  # <-- add **kwargs here
         branch = db.session.get(Branch, value)  # SQLAlchemy 2.0 way
@@ -39,7 +39,7 @@ class FixedAssetSchema(Schema):
     value = fields.Decimal(required=True, as_string=True)
     quantity = fields.Int(required=True)
     purchase_invoice = fields.Str(required=True)
-    product_code = fields.Str(required=True)
+    product_code = fields.Str()
     category = fields.Str(required=True)
     subcategory = fields.Str(required=True)
     is_active = fields.Bool(required=True)

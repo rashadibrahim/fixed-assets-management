@@ -1,9 +1,13 @@
 import os
 import uuid
+import io
+import base64
 from flask import current_app, jsonify
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from functools import wraps
-from .models import User
+from .models import User, FixedAsset
+import barcode
+from barcode.writer import ImageWriter
 
 def save_upload(file_storage):
     """
@@ -73,3 +77,52 @@ def admin_required(fn):
 
         return fn(*args, **kwargs)
     return wrapper
+
+
+def generate_unique_product_code():
+    """
+    Generate a unique product code for an asset.
+    Format: FA-XXXXX (where X is a random alphanumeric character)
+    """
+    from . import db
+    
+    while True:
+        # Generate a random code with prefix FA-
+        random_part = uuid.uuid4().hex[:5].upper()
+        product_code = f"FA-{random_part}"
+        
+        # Check if this code already exists in the database
+        existing = db.session.query(FixedAsset).filter_by(product_code=product_code).first()
+        if not existing:
+            return product_code
+
+
+def generate_barcode(product_code):
+    """
+    Generate a barcode image as base64 encoded string from a product code.
+    
+    Args:
+        product_code: The product code to encode in the barcode
+        
+    Returns:
+        dict: Dictionary containing the barcode image as base64 string and the product code
+    """
+    if not product_code:
+        return None
+        
+    # Create a Code128 barcode (good for alphanumeric data)
+    code128 = barcode.get('code128', product_code, writer=ImageWriter())
+    
+    # Save the barcode to a bytes buffer instead of a file
+    buffer = io.BytesIO()
+    code128.write(buffer)
+    
+    # Get the bytes value and encode as base64
+    buffer.seek(0)
+    barcode_bytes = buffer.getvalue()
+    barcode_base64 = base64.b64encode(barcode_bytes).decode('utf-8')
+    
+    return {
+        'product_code': product_code,
+        'barcode_image': barcode_base64
+    }

@@ -43,7 +43,7 @@ class FixedAsset(db.Model):
     value = db.Column(db.Numeric(12, 2), nullable=False)
     quantity = db.Column(db.Integer, default=1, nullable=False)
     purchase_invoice = db.Column(db.String(255))
-    product_code = db.Column(db.String(100), unique=True, nullable=False)  # used for barcode
+    product_code = db.Column(db.String(100), unique=True, nullable=True)  # used for barcode
     category = db.Column(db.String(100), nullable=False)
     subcategory = db.Column(db.String(100), nullable=False)
     is_active = db.Column(db.Boolean, default=True)

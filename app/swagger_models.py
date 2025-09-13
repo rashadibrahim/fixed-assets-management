@@ -11,6 +11,12 @@ success_model = api.model('SuccessResponse', {
     'message': fields.String(description='Success message')
 })
 
+# Barcode response model
+barcode_model = api.model('BarcodeResponse', {
+    'product_code': fields.String(description='Product code used for the barcode'),
+    'barcode_image': fields.String(description='Base64 encoded barcode image')
+})
+
 # Pagination response model
 pagination_model = api.model('PaginationResponse', {
     'items': fields.Raw(description='List of items'),
@@ -168,6 +174,13 @@ job_role_input_model = api.model('JobRoleInput', {
     'can_edit_asset': fields.Boolean(description='Permission to edit assets', default=False),
     'can_delete_asset': fields.Boolean(description='Permission to delete assets', default=False),
     'can_print_barcode': fields.Boolean(description='Permission to print barcodes', default=False)
+})
+
+# File upload models
+file_upload_response_model = api.model('FileUploadResponse', {
+    'id': fields.Integer(description='File ID'),
+    'asset_id': fields.Integer(description='Asset ID'),
+    'file_path': fields.String(description='File path')
 })
 
 # Authentication models

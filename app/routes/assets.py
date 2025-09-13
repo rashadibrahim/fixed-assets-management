@@ -1,15 +1,16 @@
 from flask import Blueprint, request, jsonify
 from flask_restx import Resource
 from marshmallow import ValidationError
+from werkzeug.utils import secure_filename
 from .. import db
-from ..models import FixedAsset
-from ..schemas import FixedAssetSchema
+from ..models import FixedAsset, AttachedFile
+from ..schemas import FixedAssetSchema, AttachedFileSchema
 from flask_jwt_extended import jwt_required
-from ..utils import check_permission
+from ..utils import check_permission, generate_barcode, generate_unique_product_code, save_upload
 from ..swagger import assets_ns, add_standard_responses
 from ..swagger_models import (
     asset_model, asset_input_model, pagination_model, 
-    error_model, success_model
+    error_model, success_model, barcode_model, file_upload_response_model
 )
 
 bp = Blueprint("assets", __name__, url_prefix="/assets")
@@ -80,7 +81,154 @@ class AssetList(Resource):
         return asset_schema.dump(new_asset), 201
 
 
-@assets_ns.route("/<int:asset_id>")
+@assets_ns.route("/<int:asset_id>/barcode")
+class AssetBarcode(Resource):
+    @assets_ns.doc('get_asset_barcode', security='Bearer Auth')
+    @assets_ns.marshal_with(barcode_model, code=200, description='Successfully generated barcode')
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'Asset not found', error_model)
+    @jwt_required()
+    def get(self, asset_id):
+        """Generate a barcode for a specific asset"""
+        error = check_permission("can_print_barcode")
+        if error:
+            return error
+            
+        # Get the asset
+        asset = db.session.query(FixedAsset).filter_by(id=asset_id).first()
+        if not asset:
+            return {"error": "Asset not found"}, 404
+            
+        # Check if asset has a product code, if not generate one
+        if not asset.product_code:
+            asset.product_code = generate_unique_product_code()
+            db.session.commit()
+            
+        # Generate barcode
+        barcode_data = generate_barcode(asset.product_code)
+        return barcode_data
+
+
+@assets_ns.route("/<int:asset_id>/files")
+class AssetFiles(Resource):
+    @assets_ns.doc('get_asset_files', security='Bearer Auth')
+    @assets_ns.marshal_with(pagination_model, code=200, description='Successfully retrieved files')
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'Asset not found', error_model)
+    @assets_ns.param('page', 'Page number for pagination', type='integer', default=1)
+    @assets_ns.param('per_page', 'Number of items per page', type='integer', default=10)
+    @jwt_required()
+    def get(self, asset_id):
+        """Get all files attached to a specific asset"""
+        error = check_permission("can_read_asset")
+        if error:
+            return error
+            
+        # Check if asset exists
+        asset = db.session.query(FixedAsset).filter_by(id=asset_id).first()
+        if not asset:
+            return {"error": "Asset not found"}, 404
+            
+        # Pagination
+        page = request.args.get("page", 1, type=int)
+        per_page = request.args.get("per_page", 10, type=int)
+        
+        # Query files
+        query = db.session.query(AttachedFile).filter_by(asset_id=asset_id)
+        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+        
+        # Return paginated files
+        file_schema = AttachedFileSchema(many=True)
+        return {
+            "items": file_schema.dump(paginated.items),
+            "total": paginated.total,
+            "page": paginated.page,
+            "pages": paginated.pages
+        }
+    
+    @assets_ns.doc('upload_asset_file', security='Bearer Auth')
+    @assets_ns.marshal_with(file_upload_response_model, code=201, description='Successfully uploaded file')
+    @assets_ns.response(400, 'Bad Request', error_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'Asset not found', error_model)
+    @jwt_required()
+    def post(self, asset_id):
+        """Upload a file attachment for a specific asset"""
+        error = check_permission("can_edit_asset")
+        if error:
+            return error
+            
+        # Check if asset exists
+        asset = db.session.query(FixedAsset).filter_by(id=asset_id).first()
+        if not asset:
+            return {"error": "Asset not found"}, 404
+            
+        # Check if file was uploaded
+        if 'file' not in request.files:
+            return {"error": "No file part in the request"}, 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return {"error": "No file selected"}, 400
+            
+        # Save the file
+        filename = save_upload(file)
+        if not filename:
+            return {"error": "Failed to save file"}, 500
+            
+        # Create file record in database
+        file_record = AttachedFile(asset_id=asset_id, file_path=filename)
+        db.session.add(file_record)
+        db.session.commit()
+        
+        # Return the file record
+        file_schema = AttachedFileSchema()
+        return file_schema.dump(file_record), 201
+
+
+@assets_ns.route("/<int:asset_id>/files/<int:file_id>")
+class AssetFileResource(Resource):
+    @assets_ns.doc('delete_asset_file', security='Bearer Auth')
+    @assets_ns.marshal_with(success_model, code=200, description='Successfully deleted file')
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'File not found', error_model)
+    @jwt_required()
+    def delete(self, asset_id, file_id):
+        """Delete a file attachment from a specific asset"""
+        error = check_permission("can_edit_asset")
+        if error:
+            return error
+            
+        # Check if file exists and belongs to the specified asset
+        file_record = db.session.query(AttachedFile).filter_by(id=file_id, asset_id=asset_id).first()
+        if not file_record:
+            return {"error": "File not found or does not belong to this asset"}, 404
+            
+        # Delete the physical file from storage
+        import os
+        from flask import current_app
+        
+        file_path = os.path.join(current_app.config["UPLOAD_FOLDER"], file_record.file_path)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                # Log the error but continue with database deletion
+                print(f"Error deleting file {file_path}: {str(e)}")
+                # In production, you would use a proper logging mechanism
+        
+        # Delete the file record from database
+        db.session.delete(file_record)
+        db.session.commit()
+        
+        return {"message": f"File {file_id} deleted successfully from asset {asset_id}"}, 200
+
+
+@assets_ns.route("/<int:asset_id>")  
 class AssetResource(Resource):
     @assets_ns.doc('get_asset', security='Bearer Auth')
     @assets_ns.marshal_with(asset_model, code=200, description='Successfully retrieved asset')
