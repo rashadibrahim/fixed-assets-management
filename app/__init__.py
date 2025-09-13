@@ -37,6 +37,7 @@ def create_app():
     from .routes import assets, branches, warehouses, job_roles
     from .routes import auth
 
+    # Register blueprints with /api prefix
     app.register_blueprint(assets.bp, url_prefix="/api/assets")
     app.register_blueprint(branches.bp, url_prefix="/api/branches")
     app.register_blueprint(warehouses.bp, url_prefix="/api/warehouses")

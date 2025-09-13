@@ -7,11 +7,13 @@ from ..models import FixedAsset, AttachedFile
 from ..schemas import FixedAssetSchema, AttachedFileSchema
 from flask_jwt_extended import jwt_required
 from ..utils import check_permission, generate_barcode, generate_unique_product_code, save_upload
-from ..swagger import assets_ns, add_standard_responses
+from ..swagger import assets_ns, add_standard_responses, api
 from ..swagger_models import (
     asset_model, asset_input_model, pagination_model, 
     error_model, success_model, barcode_model, file_upload_response_model
 )
+import os
+from flask import current_app, send_from_directory
 
 bp = Blueprint("assets", __name__, url_prefix="/assets")
 asset_schema = FixedAssetSchema()
@@ -111,6 +113,7 @@ class AssetBarcode(Resource):
 
 
 @assets_ns.route("/<int:asset_id>/files")
+@assets_ns.param('asset_id', 'The asset identifier')
 class AssetFiles(Resource):
     @assets_ns.doc('get_asset_files', security='Bearer Auth')
     @assets_ns.marshal_with(pagination_model, code=200, description='Successfully retrieved files')
@@ -154,6 +157,7 @@ class AssetFiles(Resource):
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
     @assets_ns.response(404, 'Asset not found', error_model)
+    @assets_ns.expect(api.parser().add_argument('file', location='files', type='file', required=True, help='File to upload'))
     @jwt_required()
     def post(self, asset_id):
         """Upload a file attachment for a specific asset"""
@@ -190,7 +194,89 @@ class AssetFiles(Resource):
 
 
 @assets_ns.route("/<int:asset_id>/files/<int:file_id>")
+@assets_ns.param('asset_id', 'The asset identifier')
+@assets_ns.param('file_id', 'The file identifier')
 class AssetFileResource(Resource):
+    @assets_ns.doc('download_asset_file', security='Bearer Auth', description='Download a file attachment from a specific asset')
+    @assets_ns.produces(['application/octet-stream'])
+    @assets_ns.response(200, 'File download successful')
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'File not found', error_model)
+    @assets_ns.response(500, 'Server error', error_model)
+    #@jwt_required()
+    def get(self, asset_id, file_id):
+        """Download a file attachment from a specific asset"""
+        # error = check_permission("can_read_asset")
+        # if error:
+        #     return error
+            
+        # Check if file exists and belongs to the specified asset
+        file_record = db.session.query(AttachedFile).filter_by(id=file_id, asset_id=asset_id).first()
+        if not file_record:
+            return {"error": "File not found or does not belong to this asset"}, 404
+            
+        # Get the file path
+        file_path = file_record.file_path
+        upload_folder = current_app.config["UPLOAD_FOLDER"]
+        
+        # Check if file exists
+        full_path = os.path.join(upload_folder, file_path)
+        if not os.path.exists(full_path):
+            return {"error": "File not found on server"}, 404
+        
+        # Get original filename if available, otherwise use the stored filename
+        filename = os.path.basename(file_path)
+        
+        # Return the file as an attachment
+        return send_from_directory(
+            directory=upload_folder,
+            path=filename,
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    # @assets_ns.doc('download_asset_file', security='Bearer Auth', description='Download a file attachment from a specific asset')
+    # @assets_ns.produces(['application/octet-stream'])
+    # @assets_ns.response(200, 'File download successful')
+    # @assets_ns.response(401, 'Unauthorized', error_model)
+    # @assets_ns.response(403, 'Forbidden', error_model)
+    # @assets_ns.response(404, 'File not found', error_model)
+    # @assets_ns.response(500, 'Server error', error_model)
+    # #@jwt_required()
+    # def get(self, asset_id, file_id):
+    #     """Download a file attachment from a specific asset"""
+    #     # error = check_permission("can_read_asset")
+    #     # if error:
+    #     #     return error
+            
+    #     # Check if file exists and belongs to the specified asset
+    #     file_record = db.session.query(AttachedFile).filter_by(id=file_id, asset_id=asset_id).first()
+    #     if not file_record:
+    #         return {"error": "File not found or does not belong to this asset"}, 404
+            
+    #     # Get the file path
+    #     import os
+    #     from flask import current_app, send_from_directory
+        
+    #     file_path = file_record.file_path
+    #     upload_folder = current_app.config["UPLOAD_FOLDER"]
+        
+    #     # Check if file exists
+    #     full_path = os.path.join(upload_folder, file_path)
+    #     if not os.path.exists(full_path):
+    #         return {"error": "File not found on server"}, 404
+        
+    #     # Get original filename if available, otherwise use the stored filename
+    #     filename = os.path.basename(file_path)
+        
+    #     # Return the file as an attachment
+    #     return send_from_directory(
+    #         directory=upload_folder,
+    #         path=file_path,
+    #         as_attachment=True,
+    #         download_name=filename
+    #     )
     @assets_ns.doc('delete_asset_file', security='Bearer Auth')
     @assets_ns.marshal_with(success_model, code=200, description='Successfully deleted file')
     @assets_ns.response(401, 'Unauthorized', error_model)
@@ -209,9 +295,6 @@ class AssetFileResource(Resource):
             return {"error": "File not found or does not belong to this asset"}, 404
             
         # Delete the physical file from storage
-        import os
-        from flask import current_app
-        
         file_path = os.path.join(current_app.config["UPLOAD_FOLDER"], file_record.file_path)
         if os.path.exists(file_path):
             try:
@@ -219,13 +302,53 @@ class AssetFileResource(Resource):
             except Exception as e:
                 # Log the error but continue with database deletion
                 print(f"Error deleting file {file_path}: {str(e)}")
-                # In production, you would use a proper logging mechanism
         
         # Delete the file record from database
         db.session.delete(file_record)
         db.session.commit()
         
         return {"message": f"File {file_id} deleted successfully from asset {asset_id}"}, 200
+
+
+@assets_ns.route("/files/<int:file_id>")
+@assets_ns.param('file_id', 'The file identifier')
+class FileResource(Resource):
+    @assets_ns.doc('get_file_by_id', description='Download a file attachment by ID only')
+    @assets_ns.produces(['application/octet-stream'])
+    @assets_ns.response(200, 'File download successful')
+    @assets_ns.response(404, 'File not found', error_model)
+    @assets_ns.response(500, 'Server error', error_model)
+    @jwt_required()
+    def get(self, file_id):
+        """Download a file attachment by ID only"""
+        error = check_permission("can_read_asset")
+        if error:
+            return error
+        
+        # Check if file exists
+        file_record = db.session.query(AttachedFile).filter_by(id=file_id).first()
+        if not file_record:
+            return {"error": "File not found"}, 404
+            
+        # Get the file path
+        file_path = file_record.file_path
+        upload_folder = current_app.config["UPLOAD_FOLDER"]
+        
+        # Check if file exists
+        full_path = os.path.join(upload_folder, file_path)
+        if not os.path.exists(full_path):
+            return {"error": "File not found on server"}, 404
+        
+        # Get original filename if available, otherwise use the stored filename
+        filename = os.path.basename(file_path)
+        
+        # Return the file as an attachment
+        return send_from_directory(
+            directory=upload_folder,
+            path=file_path,
+            as_attachment=True,
+            download_name=filename
+        )
 
 
 @assets_ns.route("/<int:asset_id>")  
