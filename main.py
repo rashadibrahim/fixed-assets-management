@@ -1,0 +1,47 @@
+from app import create_app, db
+from flask_migrate import Migrate
+from app.models import Branch, Warehouse, FixedAsset
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Create app using the factory in app/__init__.py
+app = create_app()
+
+# Setup Flask-Migrate (Alembic wrapper) with the app and db
+migrate = Migrate(app, db)
+
+# Simple database initialization
+with app.app_context():
+    try:
+        # Create all tables
+        db.create_all()
+        logging.info("✅ Database tables created successfully")
+        
+        # Verify connection by running a simple query
+        result = db.session.execute(db.text("SELECT 1"))
+        logging.info("✅ Database connection verified")
+        
+    except Exception as e:
+        logging.error(f"❌ Database initialization failed: {e}")
+        exit(1)
+
+# Helpful shell context for `flask shell` or when using python manage.py shell
+@app.shell_context_processor
+def make_shell_context():
+    return {"db": db, "Branch": Branch, "Warehouse": Warehouse, "FixedAsset": FixedAsset}
+
+if __name__ == "__main__":
+    try:
+        # Start the Flask application
+        print("🚀 Starting Flask application...")
+        app.run(host="0.0.0.0", debug=True, threaded=True)
+        
+    except Exception as e:
+        logging.error(f"Failed to start application: {e}")
+        exit(1)
+
