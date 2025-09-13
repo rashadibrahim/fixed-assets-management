@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from flask_restx import Resource
 from marshmallow import ValidationError
 from werkzeug.utils import secure_filename
@@ -193,8 +193,8 @@ class AssetFiles(Resource):
         return file_schema.dump(file_record), 201
 
 
-@assets_ns.route("/<int:asset_id>/files/<int:file_id>")
-@assets_ns.param('asset_id', 'The asset identifier')
+@assets_ns.route("/files/<int:file_id>")
+# @assets_ns.param('asset_id', 'The asset identifier')
 @assets_ns.param('file_id', 'The file identifier')
 class AssetFileResource(Resource):
     @assets_ns.doc('download_asset_file', security='Bearer Auth', description='Download a file attachment from a specific asset')
@@ -204,37 +204,34 @@ class AssetFileResource(Resource):
     @assets_ns.response(403, 'Forbidden', error_model)
     @assets_ns.response(404, 'File not found', error_model)
     @assets_ns.response(500, 'Server error', error_model)
-    #@jwt_required()
-    def get(self, asset_id, file_id):
+    @jwt_required()
+    def get(self, file_id):
         """Download a file attachment from a specific asset"""
-        # error = check_permission("can_read_asset")
-        # if error:
-        #     return error
+        error = check_permission("can_read_asset")
+        if error:
+            return error
             
         # Check if file exists and belongs to the specified asset
-        file_record = db.session.query(AttachedFile).filter_by(id=file_id, asset_id=asset_id).first()
-        if not file_record:
-            return {"error": "File not found or does not belong to this asset"}, 404
+        file_record = db.session.query(AttachedFile).filter_by(id=file_id).first()
+        # if not file_record:
+        #     return {"error": "File not found or does not belong to this asset"}, 404
             
-        # Get the file path
+        # # Get the file path
         file_path = file_record.file_path
         upload_folder = current_app.config["UPLOAD_FOLDER"]
         
-        # Check if file exists
+        # # Check if file exists
         full_path = os.path.join(upload_folder, file_path)
         if not os.path.exists(full_path):
             return {"error": "File not found on server"}, 404
         
-        # Get original filename if available, otherwise use the stored filename
-        filename = os.path.basename(file_path)
-        
         # Return the file as an attachment
-        return send_from_directory(
-            directory=upload_folder,
-            path=filename,
+        return send_file(
+            full_path,
             as_attachment=True,
-            download_name=filename
+            download_name=os.path.basename(file_record.file_path)  # original filename
         )
+        
     
     # @assets_ns.doc('download_asset_file', security='Bearer Auth', description='Download a file attachment from a specific asset')
     # @assets_ns.produces(['application/octet-stream'])
