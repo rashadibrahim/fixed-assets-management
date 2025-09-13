@@ -2,6 +2,7 @@ from app import create_app, db
 from flask_migrate import Migrate
 from app.models import Branch, Warehouse, FixedAsset
 import logging
+from flask_cors import CORS
 
 # Configure logging
 logging.basicConfig(
@@ -11,6 +12,9 @@ logging.basicConfig(
 
 # Create app using the factory in app/__init__.py
 app = create_app()
+
+# Enable CORS for all routes
+CORS(app, origins=["*"])
 
 # Setup Flask-Migrate (Alembic wrapper) with the app and db
 migrate = Migrate(app, db)
