@@ -1,4 +1,5 @@
 import os
+from random import random
 import uuid
 import io
 import base64
@@ -9,20 +10,20 @@ from .models import User, FixedAsset
 import barcode
 from barcode.writer import ImageWriter
 
-def save_upload(file_storage):
-    """
-    Save uploaded FileStorage to UPLOAD_FOLDER with a unique name.
-    Returns the stored filename (not full path).
-    """
-    if not file_storage:
-        return None
-    # original filename for extension
-    filename = file_storage.filename
-    _, ext = os.path.splitext(filename)
-    unique_name = f"{uuid.uuid4().hex}{ext}"
-    path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
-    file_storage.save(path)
-    return unique_name
+# def save_upload(file_storage):
+#     """
+#     Save uploaded FileStorage to UPLOAD_FOLDER with a unique name.
+#     Returns the stored filename (not full path).
+#     """
+#     if not file_storage:
+#         return None
+#     # original filename for extension
+#     filename = file_storage.filename
+#     _, ext = os.path.splitext(filename)
+#     unique_name = f"{uuid.uuid4().hex}{ext}"
+#     path = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
+#     file_storage.save(path)
+#     return unique_name
 
 def error_response(message, code=400, details=None):
     """Convenience to return JSON error responses.
@@ -81,21 +82,19 @@ def admin_required(fn):
 
 def generate_unique_product_code():
     """
-    Generate a unique product code for an asset.
-    Format: FA-XXXXX (where X is a random alphanumeric character)
+    Generate a unique 6-digit product code for an asset.
+    Format: 6 random digits (e.g., 482913).
     """
     from . import db
     
     while True:
-        # Generate a random code with prefix FA-
-        random_part = uuid.uuid4().hex[:5].upper()
-        product_code = f"HA-{random_part}"
-        
-        # Check if this code already exists in the database
-        existing = db.session.query(FixedAsset).filter_by(product_code=product_code).first()
-        if not existing:
-            return product_code
+        # Generate a random 6-digit number
+        random_number = str(random.randint(100000, 999999))
 
+        # Check if this code already exists in the database
+        existing = db.session.query(FixedAsset).filter_by(product_code=random_number).first()
+        if not existing:
+            return random_number
 
 def generate_barcode(product_code):
     """

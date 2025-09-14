@@ -25,6 +25,7 @@ class JobRoleList(Resource):
     @job_roles_ns.param('page', 'Page number for pagination', type='integer', default=1)
     @job_roles_ns.param('per_page', 'Number of items per page', type='integer', default=10)
     @jwt_required()
+    @admin_required
     def get(self):
         """Get all job roles with pagination"""
         page = request.args.get("page", 1, type=int)

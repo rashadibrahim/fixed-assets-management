@@ -1,5 +1,5 @@
 from marshmallow import Schema, fields, validates, ValidationError
-from .models import db, Warehouse, Branch
+from .models import db, Category, Branch
 
 
 class BranchSchema(Schema):
@@ -31,27 +31,26 @@ class AttachedFileSchema(Schema):
     uploaded_at = fields.DateTime(dump_only=True)
     comment = fields.Str()
 
+class CategorySchema(Schema):
+    id = fields.Int(dump_only=True)
+    category = fields.Str(required=True)
+    subcategory = fields.Str(required=True)
+
 
 class FixedAssetSchema(Schema):
     id = fields.Int(dump_only=True)
     name_ar = fields.Str(required=True)
     name_en = fields.Str(required=True)
-    purchase_date = fields.Date(required=True)
-    warehouse_id = fields.Int(required=True)
-    value = fields.Decimal(required=True, as_string=True)
-    quantity = fields.Int(required=True)
-    purchase_invoice = fields.Str(required=True)
+    quantity = fields.Int()
     product_code = fields.Str()
-    category = fields.Str(required=True)
-    subcategory = fields.Str(required=True)
+    category_id = fields.Int(required=True)
     is_active = fields.Bool(required=True)
-    created_at = fields.DateTime(dump_only=True)
-    attached_files = fields.List(fields.Nested(AttachedFileSchema), dump_only=True)
-    @validates("warehouse_id")
-    def validate_warehouse(self, value, **kwargs):
-        warehouse = db.session.get(Warehouse, value)  # SQLAlchemy 2.0 way
-        if warehouse is None:
-            raise ValidationError("Invalid warehouse_id: warehouse does not exist.")
+
+    @validates("category_id")
+    def validate_category(self, value, **kwargs):
+        category = db.session.get(Category, value)  # SQLAlchemy 2.0 way
+        if category is None:
+            raise ValidationError("Invalid category_id: category does not exist.")
 
 
 class JobDescriptionSchema(Schema):

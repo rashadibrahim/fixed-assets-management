@@ -1,5 +1,5 @@
 from flask_restx import fields
-from .swagger import api, branches_ns, warehouses_ns, assets_ns, auth_ns, job_roles_ns
+from .swagger import api, branches_ns, warehouses_ns, assets_ns, categories_ns, auth_ns, job_roles_ns
 
 # Common response models
 error_model = api.model('ErrorResponse', {
@@ -68,38 +68,36 @@ warehouse_input_model = api.model('WarehouseInput', {
     'address_en': fields.String(description='Warehouse address in English'),
 })
 
+
+# Category models
+category_model = api.model('Category', {
+    'id': fields.Integer(readonly=True, description='Category unique identifier'),
+    'category': fields.String(required=True, description='Asset category'),
+    'subcategory': fields.String(required=True, description='Asset subcategory')
+})
+
+category_input_model = api.model('CategoryInput', {
+    'category': fields.String(required=True, description='Asset category'),
+    'subcategory': fields.String(required=True, description='Asset subcategory')
+})
+
 # Fixed Asset models
 asset_model = api.model('FixedAsset', {
     'id': fields.Integer(readonly=True, description='Asset unique identifier'),
     'name_ar': fields.String(required=True, description='Asset name in Arabic'),
     'name_en': fields.String(required=True, description='Asset name in English'),
-    'purchase_date': fields.Date(required=True, description='Date of purchase'),
-    'warehouse_id': fields.Integer(required=True, description='Warehouse ID this asset belongs to'),
-    'value': fields.Float(description='Asset value'),
     'quantity': fields.Integer(required=True, description='Asset quantity', default=1),
-    'purchase_invoice': fields.String(required=True, description='Purchase invoice reference'),
-    'product_code': fields.String(required=True, description='Product code or serial number (used for barcode)'),
-    'category': fields.String(required=True, description='Asset category'),
-    'subcategory': fields.String(required=True, description='Asset subcategory'),
-    'is_active': fields.Boolean(required=True, description='Whether the asset is active'),
-    'created_at': fields.DateTime(readonly=True, description='Asset creation timestamp'),
-    'attached_files': fields.List(fields.Nested(api.model('AttachedFile', {
-        'id': fields.Integer(description='File ID'),
-        'file_path': fields.String(description='File path')
-    })), readonly=True, description='List of attached files')
+    'product_code': fields.String(description='Product code or serial number (used for barcode)'),
+    'category_id': fields.Integer(required=True, description='Category ID this asset belongs to'),
+    'is_active': fields.Boolean(required=True, description='Whether the asset is active')
 })
 
 asset_input_model = api.model('FixedAssetInput', {
     'name_ar': fields.String(required=True, description='Asset name in Arabic'),
     'name_en': fields.String(required=True, description='Asset name in English'),
-    'purchase_date': fields.Date(required=True, description='Date of purchase'),
-    'warehouse_id': fields.Integer(required=True, description='Warehouse ID this asset belongs to'),
-    'value': fields.Float(description='Asset value'),
     'quantity': fields.Integer(description='Asset quantity', default=1),
-    'purchase_invoice': fields.String(required=True, description='Purchase invoice reference'),
-    'product_code': fields.String(required=True, description='Product code or serial number'),
-    'category': fields.String(required=True, description='Asset category'),
-    'subcategory': fields.String(required=True, description='Asset subcategory'),
+    'product_code': fields.String(description='Product code or serial number'),
+    'category_id': fields.Integer(required=True, description='Category ID this asset belongs to'),
     'is_active': fields.Boolean(description='Whether the asset is active', default=True)
 })
 
@@ -176,14 +174,6 @@ job_role_input_model = api.model('JobRoleInput', {
     'can_print_barcode': fields.Boolean(description='Permission to print barcodes', default=False)
 })
 
-# File upload models
-file_upload_response_model = api.model('FileUploadResponse', {
-    'id': fields.Integer(description='File ID'),
-    'asset_id': fields.Integer(description='Asset ID'),
-    'file_path': fields.String(description='File path'),
-    'comment': fields.String(description='File comment')
-})
-
 # Authentication models
 login_model = api.model('Login', {
     'email': fields.String(required=True, description='User email address'),
@@ -205,3 +195,14 @@ stats_model = api.model('Statistics', {
     'total_users': fields.Integer(description='Total number of users'),
     'job_roles_count': fields.Integer(description='Number of job roles')
 })
+
+
+
+
+# File upload models
+# file_upload_response_model = api.model('FileUploadResponse', {
+#     'id': fields.Integer(description='File ID'),
+#     'asset_id': fields.Integer(description='Asset ID'),
+#     'file_path': fields.String(description='File path'),
+#     'comment': fields.String(description='File comment')
+# })

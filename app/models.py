@@ -27,10 +27,23 @@ class Warehouse(db.Model):
     address_en = db.Column(db.String(500), nullable=False)
 
     branch = db.relationship("Branch", back_populates="warehouses")
-    assets = db.relationship("FixedAsset", back_populates="warehouse", cascade="all, delete-orphan")
+    # assets = db.relationship("FixedAsset", back_populates="warehouse", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Warehouse {self.id} {self.name_en or self.name_ar}>"
+
+
+class Category(db.Model):
+    __tablename__ = "categories"
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(100), nullable=False, unique=True)
+    subcategory = db.Column(db.String(100), nullable=False)
+    
+    # Relationship with FixedAsset
+    assets = db.relationship("FixedAsset", back_populates="category_rel", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Category {self.category} - {self.subcategory}>"
 
 
 class FixedAsset(db.Model):
@@ -38,36 +51,29 @@ class FixedAsset(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name_ar = db.Column(db.String(255), nullable=False)
     name_en = db.Column(db.String(255), nullable=False)
-    purchase_date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
-    warehouse_id = db.Column(db.Integer, db.ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True)
-    value = db.Column(db.Numeric(12, 2), nullable=False)
-    quantity = db.Column(db.Integer, default=1, nullable=False)
-    purchase_invoice = db.Column(db.String(255))
+    quantity = db.Column(db.Integer, default=0, nullable=False)
     product_code = db.Column(db.String(100), unique=True, nullable=True)  # used for barcode
-    category = db.Column(db.String(100), nullable=False)
-    subcategory = db.Column(db.String(100), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False)
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    warehouse = db.relationship("Warehouse", back_populates="assets")
-    attached_files = db.relationship("AttachedFile", back_populates="asset", cascade="all, delete-orphan")
+    # New relationship with Category
+    category_rel = db.relationship("Category", back_populates="assets")
 
     def __repr__(self):
         return f"<FixedAsset {self.id} {self.name_en or self.name_ar}>"
-
 
 class AttachedFile(db.Model):
     __tablename__ = "attached_files"
     id = db.Column(db.Integer, primary_key=True)
     asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="CASCADE"), nullable=False)
-    file_path = db.Column(db.String(500), nullable=False)
+    file_path = db.Column(db.String(500), nullable=False, unique=True)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     comment = db.Column(db.String(500))
 
-    asset = db.relationship("FixedAsset", back_populates="attached_files")
+    # asset = db.relationship("FixedAsset", back_populates="attached_files")
 
-    def __repr__(self):
-        return f"<AttachedFile {self.id} for Asset {self.asset_id}>"
+    # def __repr__(self):
+    #     return f"<AttachedFile {self.id} for Asset {self.asset_id}>"
 
 
 class JobDescription(db.Model):
