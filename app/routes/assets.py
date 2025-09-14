@@ -258,7 +258,6 @@ class AssetFiles(Resource):
 
 
 @assets_ns.route("/files/<int:file_id>")
-# @assets_ns.param('asset_id', 'The asset identifier')
 @assets_ns.param('file_id', 'The file identifier')
 class AssetFileResource(Resource):
     @assets_ns.doc('download_asset_file', security='Bearer Auth', description='Download a file attachment from a specific asset')
@@ -303,16 +302,16 @@ class AssetFileResource(Resource):
     @assets_ns.response(403, 'Forbidden', error_model)
     @assets_ns.response(404, 'File not found', error_model)
     @jwt_required()
-    def delete(self, asset_id, file_id):
-        """Delete a file attachment from a specific asset"""
+    def delete(self, file_id):  # Remove asset_id parameter
+        """Delete a file attachment by file ID"""
         error = check_permission("can_edit_asset")
         if error:
             return error
             
-        # Check if file exists and belongs to the specified asset
-        file_record = db.session.query(AttachedFile).filter_by(id=file_id, asset_id=asset_id).first()
+        # Check if file exists
+        file_record = db.session.query(AttachedFile).filter_by(id=file_id).first()
         if not file_record:
-            return {"error": "File not found or does not belong to this asset"}, 404
+            return {"error": "File not found"}, 404
             
         # Delete the physical file from storage
         file_path = os.path.join(current_app.config["UPLOAD_FOLDER"], file_record.file_path)
@@ -327,7 +326,7 @@ class AssetFileResource(Resource):
         db.session.delete(file_record)
         db.session.commit()
         
-        return {"message": f"File {file_id} deleted successfully from asset {asset_id}"}, 200
+        return {"message": f"File {file_id} deleted successfully"}, 200
 
 
 # @assets_ns.route("/files/<int:file_id>")
@@ -440,4 +439,3 @@ class AssetResource(Resource):
         db.session.commit()
         return {"message": f"Asset {asset_id} deleted successfully"}, 200
 
-    
