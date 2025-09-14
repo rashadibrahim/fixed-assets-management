@@ -5,6 +5,7 @@ from flask_marshmallow import Marshmallow
 from flask_jwt_extended import JWTManager
 from marshmallow import ValidationError as MarshmallowValidationError
 from sqlalchemy.exc import IntegrityError, DataError
+from flask_cors import CORS
 
 db = SQLAlchemy()
 ma = Marshmallow()
@@ -13,7 +14,13 @@ jwt = JWTManager()
 
 def create_app():
     app = Flask(__name__)
-
+    CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        
+    }})
     app.config.from_object("config.Config")
 
     db.init_app(app)
