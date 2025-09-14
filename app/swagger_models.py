@@ -129,7 +129,7 @@ user_input_model = api.model('UserInput', {
 })
 
 user_update_model = api.model('UserUpdate', {
-    'username': fields.String(description='Username'),
+    'full_name': fields.String(description='Username'),
     'email': fields.String(description='User email address'),
     'role': fields.String(description='User role'),
     'permissions': fields.Nested(api.model('UserPermissions', {

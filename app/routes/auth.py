@@ -156,13 +156,12 @@ class UserResource(Resource):
 
         data = request.get_json()
 
-        # Update user base info
-        if "username" in data:
-            user.username = data["username"]
         if "email" in data:
             user.email = data["email"]
         if "role" in data:
             user.role = data["role"]
+        if "full_name" in data:
+            user.full_name = data["full_name"]
 
         # ✅ Update permissions if provided
         if "permissions" in data:

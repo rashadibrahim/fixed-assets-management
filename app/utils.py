@@ -89,7 +89,7 @@ def generate_unique_product_code():
     while True:
         # Generate a random code with prefix FA-
         random_part = uuid.uuid4().hex[:5].upper()
-        product_code = f"FA-{random_part}"
+        product_code = f"HA-{random_part}"
         
         # Check if this code already exists in the database
         existing = db.session.query(FixedAsset).filter_by(product_code=product_code).first()
