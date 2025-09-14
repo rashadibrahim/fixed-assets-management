@@ -28,6 +28,8 @@ class AttachedFileSchema(Schema):
     id = fields.Int(dump_only=True)
     asset_id = fields.Int(required=True)
     file_path = fields.Str(required=True)
+    uploaded_at = fields.DateTime(dump_only=True)
+    comment = fields.Str()
 
 
 class FixedAssetSchema(Schema):

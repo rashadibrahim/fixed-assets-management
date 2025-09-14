@@ -180,7 +180,8 @@ job_role_input_model = api.model('JobRoleInput', {
 file_upload_response_model = api.model('FileUploadResponse', {
     'id': fields.Integer(description='File ID'),
     'asset_id': fields.Integer(description='Asset ID'),
-    'file_path': fields.String(description='File path')
+    'file_path': fields.String(description='File path'),
+    'comment': fields.String(description='File comment')
 })
 
 # Authentication models

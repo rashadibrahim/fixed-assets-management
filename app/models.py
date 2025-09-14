@@ -61,6 +61,8 @@ class AttachedFile(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="CASCADE"), nullable=False)
     file_path = db.Column(db.String(500), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    comment = db.Column(db.String(500))
 
     asset = db.relationship("FixedAsset", back_populates="attached_files")
 
