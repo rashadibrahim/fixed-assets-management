@@ -2,12 +2,12 @@ from flask import Blueprint, request, jsonify
 from flask_restx import Resource, ValidationError
 from .. import db
 from ..models import Branch
-from ..schemas import BranchSchema
+from ..schemas import BranchSchema, WarehouseSchema
 from flask_jwt_extended import jwt_required
 from ..utils import check_permission
 from ..swagger import branches_ns, add_standard_responses
 from ..swagger_models import (
-    branch_model, branch_input_model, branch_with_counts_model, 
+    branch_model, branch_input_model, branch_with_warehouses_model,
     pagination_model, error_model, success_model
 )
 
@@ -16,6 +16,7 @@ bp = Blueprint("branches", __name__, url_prefix="/branches")
 branch_schema = BranchSchema()
 branches_schema = BranchSchema(many=True)
 
+warehouses_schema = WarehouseSchema(many=True)
 
 @branches_ns.route("/")
 class BranchList(Resource):
@@ -43,13 +44,7 @@ class BranchList(Resource):
 
             # Count warehouses in this branch
             warehouse_count = len(branch.warehouses)
-
-            # Count assets across all warehouses in this branch
-            asset_count = sum(len(warehouse.assets) for warehouse in branch.warehouses)
-
             branch_dict["warehouse_count"] = warehouse_count
-            branch_dict["asset_count"] = asset_count
-
             branches_data.append(branch_dict)
 
         return {
@@ -88,7 +83,7 @@ class BranchList(Resource):
 @branches_ns.route("/<int:branch_id>")
 class BranchResource(Resource):
     @branches_ns.doc('get_branch')
-    @branches_ns.marshal_with(branch_model, code=200, description='Successfully retrieved branch')
+    @branches_ns.marshal_with(branch_with_warehouses_model, code=200, description='Successfully retrieved branch')
     @branches_ns.response(401, 'Unauthorized', error_model)
     @branches_ns.response(403, 'Forbidden', error_model)
     @branches_ns.response(404, 'Branch not found', error_model)
@@ -102,7 +97,15 @@ class BranchResource(Resource):
         branch = db.session.query(Branch).filter_by(id=branch_id).first()
         if not branch:
             return {"error": "Branch not found"}, 404
-        return branch_schema.dump(branch)
+            
+        branch_data = branch_schema.dump(branch)
+        # Add warehouse count to the response
+        branch_data["warehouse_count"] = len(branch.warehouses)
+        # Add warehouses to the response
+        branch_data["warehouses"] = warehouses_schema.dump(branch.warehouses)
+        print(branch_data)
+        
+        return branch_data
 
     @branches_ns.doc('update_branch')
     @branches_ns.expect(branch_input_model, validate=False)

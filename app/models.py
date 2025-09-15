@@ -36,7 +36,7 @@ class Warehouse(db.Model):
 class Category(db.Model):
     __tablename__ = "categories"
     id = db.Column(db.Integer, primary_key=True)
-    category = db.Column(db.String(100), nullable=False, unique=True)
+    category = db.Column(db.String(100), nullable=False)
     subcategory = db.Column(db.String(100), nullable=False)
     
     # Relationship with FixedAsset
@@ -58,22 +58,36 @@ class FixedAsset(db.Model):
 
     # New relationship with Category
     category_rel = db.relationship("Category", back_populates="assets")
+    #transactions = db.relationship("AssetTransaction", back_populates="asset", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<FixedAsset {self.id} {self.name_en or self.name_ar}>"
 
-class AttachedFile(db.Model):
-    __tablename__ = "attached_files"
-    id = db.Column(db.Integer, primary_key=True)
-    asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="CASCADE"), nullable=False)
-    file_path = db.Column(db.String(500), nullable=False, unique=True)
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
-    comment = db.Column(db.String(500))
+# class AssetTransaction(db.Model):
+#     __tablename__ = "asset_transactions"
+#     id = db.Column(db.Integer, primary_key=True)
 
-    # asset = db.relationship("FixedAsset", back_populates="attached_files")
+#     asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="CASCADE"), nullable=False)
+#     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))  # who added
+#     quantity_added = db.Column(db.Integer, nullable=False)
+#     created_at = db.Column(db.DateTime, default=db.func.now())
 
-    # def __repr__(self):
-    #     return f"<AttachedFile {self.id} for Asset {self.asset_id}>"
+#     # Relationships
+#     asset = db.relationship("FixedAsset", back_populates="transactions")
+#     user = db.relationship("User", back_populates="asset_transactions")
+#     files = db.relationship("AssetTransactionFile", back_populates="transaction", cascade="all, delete-orphan")
+
+
+# class AssetTransactionFile(db.Model):
+#     __tablename__ = "asset_transaction_files"
+#     id = db.Column(db.Integer, primary_key=True)
+
+#     transaction_id = db.Column(db.Integer, db.ForeignKey("asset_transactions.id", ondelete="CASCADE"), nullable=False)
+#     file_path = db.Column(db.String(255), nullable=False)  # path in your uploads folder
+#     uploaded_at = db.Column(db.DateTime, default=db.func.now())
+
+#     # Relationship
+#     transaction = db.relationship("AssetTransaction", back_populates="files")
 
 
 class JobDescription(db.Model):

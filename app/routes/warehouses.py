@@ -8,7 +8,7 @@ from flask_jwt_extended import jwt_required
 from ..utils import check_permission
 from ..swagger import warehouses_ns, add_standard_responses
 from ..swagger_models import (
-    warehouse_model, warehouse_input_model, warehouse_with_assets_model, 
+    warehouse_model, warehouse_input_model, 
     pagination_model, error_model, success_model
 )
 
@@ -38,14 +38,10 @@ class WarehouseList(Resource):
 
         query = db.session.query(Warehouse).paginate(page=page, per_page=per_page, error_out=False)
 
-        warehouses_data = []
-        for warehouse in query.items:
-            warehouse_dict = warehouse_schema.dump(warehouse)
-            warehouse_dict["asset_count"] = len(warehouse.assets)  # count related assets
-            warehouses_data.append(warehouse_dict)
+
 
         return {
-            "items": warehouses_data,
+            "items": warehouses_schema.dump(query.items),
             "total": query.total,
             "page": query.page,
             "pages": query.pages
@@ -97,7 +93,7 @@ class WarehouseResource(Resource):
 
     @warehouses_ns.doc('update_warehouse')
     @warehouses_ns.expect(warehouse_input_model, validate=False)
-    @warehouses_ns.marshal_with(warehouse_with_assets_model, code=200, description='Successfully updated warehouse')
+    @warehouses_ns.marshal_with(warehouse_model, code=200, description='Successfully updated warehouse')
     @warehouses_ns.response(400, 'Bad Request', error_model)
     @warehouses_ns.response(401, 'Unauthorized', error_model)
     @warehouses_ns.response(403, 'Forbidden', error_model)
@@ -127,8 +123,6 @@ class WarehouseResource(Resource):
 
         # Return updated warehouse with asset count
         result = warehouse_schema.dump(warehouse)
-        result["asset_count"] = len(warehouse.assets)
-
         return result, 200
 
     @warehouses_ns.doc('delete_warehouse')

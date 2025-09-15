@@ -25,26 +25,6 @@ pagination_model = api.model('PaginationResponse', {
     'pages': fields.Integer(description='Total number of pages')
 })
 
-# Branch models
-branch_model = api.model('Branch', {
-    'id': fields.Integer(readonly=True, description='Branch unique identifier'),
-    'name_ar': fields.String(required=True, description='Branch name in Arabic'),
-    'name_en': fields.String(description='Branch name in English'),
-    'address_ar': fields.String(description='Branch address in Arabic'),
-    'address_en': fields.String(description='Branch address in English'),
-})
-
-branch_with_counts_model = api.clone('BranchWithCounts', branch_model, {
-    'warehouse_count': fields.Integer(description='Number of warehouses in this branch'),
-    'asset_count': fields.Integer(description='Number of assets across all warehouses in this branch')
-})
-
-branch_input_model = api.model('BranchInput', {
-    'name_ar': fields.String(required=True, description='Branch name in Arabic'),
-    'name_en': fields.String(description='Branch name in English'),
-    'address_ar': fields.String(description='Branch address in Arabic'),
-    'address_en': fields.String(description='Branch address in English'),
-})
 
 # Warehouse models
 warehouse_model = api.model('Warehouse', {
@@ -56,9 +36,6 @@ warehouse_model = api.model('Warehouse', {
     'address_en': fields.String(description='Warehouse address in English'),
 })
 
-warehouse_with_assets_model = api.clone('WarehouseWithAssets', warehouse_model, {
-    'asset_count': fields.Integer(description='Number of assets in this warehouse')
-})
 
 warehouse_input_model = api.model('WarehouseInput', {
     'branch_id': fields.Integer(description='Branch ID this warehouse belongs to'),
@@ -67,6 +44,28 @@ warehouse_input_model = api.model('WarehouseInput', {
     'address_ar': fields.String(description='Warehouse address in Arabic'),
     'address_en': fields.String(description='Warehouse address in English'),
 })
+
+# Branch models
+branch_model = api.model('Branch', {
+    'id': fields.Integer(readonly=True, description='Branch unique identifier'),
+    'name_ar': fields.String(required=True, description='Branch name in Arabic'),
+    'name_en': fields.String(description='Branch name in English'),
+    'address_ar': fields.String(description='Branch address in Arabic'),
+    'address_en': fields.String(description='Branch address in English')
+})
+
+branch_with_warehouses_model = api.clone('BranchWithCounts', branch_model, {
+    'warehouse_count': fields.Integer(description='Number of warehouses in branch'),
+    'warehouses': fields.List(fields.Nested(warehouse_model), description='List of warehouses in branch')
+})
+
+branch_input_model = api.model('BranchInput', {
+    'name_ar': fields.String(required=True, description='Branch name in Arabic'),
+    'name_en': fields.String(description='Branch name in English'),
+    'address_ar': fields.String(description='Branch address in Arabic'),
+    'address_en': fields.String(description='Branch address in English'),
+})
+
 
 
 # Category models
@@ -196,13 +195,3 @@ stats_model = api.model('Statistics', {
     'job_roles_count': fields.Integer(description='Number of job roles')
 })
 
-
-
-
-# File upload models
-# file_upload_response_model = api.model('FileUploadResponse', {
-#     'id': fields.Integer(description='File ID'),
-#     'asset_id': fields.Integer(description='Asset ID'),
-#     'file_path': fields.String(description='File path'),
-#     'comment': fields.String(description='File comment')
-# })

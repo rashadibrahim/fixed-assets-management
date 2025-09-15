@@ -23,14 +23,6 @@ class WarehouseSchema(Schema):
         if branch is None:
             raise ValidationError("Invalid branch_id: branch does not exist.")
 
-
-class AttachedFileSchema(Schema):
-    id = fields.Int(dump_only=True)
-    asset_id = fields.Int(required=True)
-    file_path = fields.Str(required=True)
-    uploaded_at = fields.DateTime(dump_only=True)
-    comment = fields.Str()
-
 class CategorySchema(Schema):
     id = fields.Int(dump_only=True)
     category = fields.Str(required=True)
