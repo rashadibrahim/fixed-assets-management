@@ -32,11 +32,11 @@ with app.app_context():
             print("✅ Admin job role already exists")
         
         # Create initial admin user
-        existing_admin = db.session.query(User).filter_by(email="admin").first()
+        existing_admin = db.session.query(User).filter_by(email="admin@example.com").first()
         if not existing_admin:
             admin_user = User(
                 full_name="System Administrator",
-                email="admin",
+                email="admin@example.com",
                 role="admin",
                 can_read_branch=True,
                 can_edit_branch=True,
@@ -49,12 +49,12 @@ with app.app_context():
                 can_delete_asset=True,
                 can_print_barcode=True
             )
-            admin_user.set_password("admin")  # Change this password!
+            admin_user.set_password("admin")  
             
             db.session.add(admin_user)
             db.session.commit()
             print("✅ Admin user created successfully")
-            print("📧 Email: admin")
+            print("📧 Email: admin@example.com")
             print("🔑 Password: admin")
             print("⚠️  Please change the password after first login!")
         else:

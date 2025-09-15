@@ -29,6 +29,7 @@ api = Api(
 # Define API namespaces for different resource groups
 branches_ns = api.namespace('branches', description='Branch management operations')
 warehouses_ns = api.namespace('warehouses', description='Warehouse management operations')
+categories_ns = api.namespace('categories', description='Category management operations')
 assets_ns = api.namespace('assets', description='Fixed asset management operations')
 auth_ns = api.namespace('auth', description='Authentication and user management operations')
 job_roles_ns = api.namespace('jobroles', description='Job role and permissions management operations')
