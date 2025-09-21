@@ -33,6 +33,9 @@ categories_ns = api.namespace('categories', description='Category management ope
 assets_ns = api.namespace('assets', description='Fixed asset management operations')
 auth_ns = api.namespace('auth', description='Authentication and user management operations')
 job_roles_ns = api.namespace('jobroles', description='Job role and permissions management operations')
+# Add these new namespaces to your existing ones
+transactions_ns = api.namespace('transactions', description='Transaction operations')
+asset_transactions_ns = api.namespace('asset-transactions', description='Asset transaction operations')
 
 # Define common response codes for documentation
 response_codes = {

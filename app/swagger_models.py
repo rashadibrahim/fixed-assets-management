@@ -1,5 +1,5 @@
 from flask_restx import fields
-from .swagger import api, branches_ns, warehouses_ns, assets_ns, categories_ns, auth_ns, job_roles_ns
+from .swagger import api, branches_ns, warehouses_ns, assets_ns, categories_ns, auth_ns, job_roles_ns, transactions_ns, asset_transactions_ns
 
 # Common response models
 error_model = api.model('ErrorResponse', {
@@ -195,3 +195,74 @@ stats_model = api.model('Statistics', {
     'job_roles_count': fields.Integer(description='Number of job roles')
 })
 
+
+
+# Transaction Models
+# Asset Transaction Models (define before transaction_model since it's referenced)
+asset_transaction_model = api.model('AssetTransaction', {
+    'id': fields.Integer(required=True, description='Asset Transaction ID'),
+    'transaction_id': fields.Integer(required=True, description='Transaction ID'),
+    'asset_id': fields.Integer(required=True, description='Asset ID'),
+    'quantity': fields.Integer(required=True, description='Quantity'),
+    'amount': fields.Float(description='Unit amount/price'),
+    'total_value': fields.Float(description='Total value (quantity * amount)'),
+    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)'),
+    'type_display': fields.String(description='Transaction type display (IN/OUT)'),
+    'asset': fields.Nested(asset_model, description='Asset details')
+})
+
+# Transaction Models
+transaction_model = api.model('Transaction', {
+    'id': fields.Integer(required=True, description='Transaction ID'),
+    'custom_id': fields.String(required=True, description='Custom transaction ID (Branch-specific)'),
+    'date': fields.Date(required=True, description='Transaction date'),
+    'description': fields.String(description='Transaction description'),
+    'reference_number': fields.String(description='Reference number'),
+    'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
+    'attached_file': fields.String(description='Attached file path/URL'),
+    'created_at': fields.DateTime(description='Creation timestamp'),
+    'warehouse': fields.Nested(warehouse_model, description='Warehouse details'),
+    'asset_transactions': fields.List(fields.Nested(asset_transaction_model), description='Asset transactions')
+})
+
+transaction_input_model = api.model('TransactionInput', {
+    'date': fields.Date(required=True, description='Transaction date'),
+    'description': fields.String(description='Transaction description'),
+    'reference_number': fields.String(description='Reference number'),
+    'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
+    'attached_file': fields.String(description='Attached file path/URL')
+})
+
+asset_transaction_input_create = api.model('AssetTransactionInputCreate', {
+    'asset_id': fields.Integer(required=True, description='Asset ID'),
+    'quantity': fields.Integer(required=True, description='Quantity', min=1),
+    'amount': fields.Float(description='Unit amount/price'),
+    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)')
+})
+
+transaction_create_model = api.model('TransactionCreate', {
+    'date': fields.Date(required=True, description='Transaction date'),
+    'description': fields.String(description='Transaction description'),
+    'reference_number': fields.String(description='Reference number'),
+    'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
+    'attached_file': fields.String(description='Attached file path/URL'),
+    'asset_transactions': fields.List(fields.Nested(asset_transaction_input_create), 
+                                     required=True, description='Asset transactions', min_items=1)
+})
+
+asset_transaction_input_model = api.model('AssetTransactionInput', {
+    'asset_id': fields.Integer(required=True, description='Asset ID'),
+    'quantity': fields.Integer(required=True, description='Quantity', min=1),
+    'amount': fields.Float(description='Unit amount/price'),
+    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)')
+})
+
+# Transaction Summary Model
+transaction_summary_model = api.model('TransactionSummary', {
+    'total_transactions': fields.Integer(description='Total number of transactions'),
+    'total_in_transactions': fields.Integer(description='Total IN transactions'),
+    'total_out_transactions': fields.Integer(description='Total OUT transactions'),
+    'total_in_value': fields.Float(description='Total value of IN transactions'),
+    'total_out_value': fields.Float(description='Total value of OUT transactions'),
+    'net_value': fields.Float(description='Net value (IN - OUT)')
+})

@@ -41,7 +41,7 @@ def create_app():
     api.init_app(app)
 
     # import blueprints
-    from .routes import assets, branches, warehouses, job_roles
+    from .routes import assets, branches, warehouses, job_roles, transactions
     from .routes import auth
 
     # Register blueprints with /api prefix
@@ -50,6 +50,7 @@ def create_app():
     app.register_blueprint(warehouses.bp, url_prefix="/api/warehouses")
     app.register_blueprint(job_roles.bp, url_prefix="/api/jobroles")
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
+    app.register_blueprint(transactions.bp, url_prefix="/api/transactions")
 
     @app.errorhandler(ValidationError)
     def handle_restx_validation_error(err):

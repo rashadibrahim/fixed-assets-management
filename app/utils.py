@@ -89,7 +89,7 @@ def generate_unique_product_code():
     
     while True:
         # Generate a random 6-digit number
-        random_number = str(random.randint(100000, 999999))
+        random_number = str(uuid.uuid4().int)[:6]
 
         # Check if this code already exists in the database
         existing = db.session.query(FixedAsset).filter_by(product_code=random_number).first()

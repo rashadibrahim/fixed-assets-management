@@ -1,6 +1,7 @@
 from datetime import datetime
 from . import db
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy import Numeric
 
 
 class Branch(db.Model):
@@ -27,7 +28,7 @@ class Warehouse(db.Model):
     address_en = db.Column(db.String(500), nullable=False)
 
     branch = db.relationship("Branch", back_populates="warehouses")
-    # assets = db.relationship("FixedAsset", back_populates="warehouse", cascade="all, delete-orphan")
+    transactions = db.relationship("Transaction", back_populates="warehouse", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Warehouse {self.id} {self.name_en or self.name_ar}>"
@@ -58,36 +59,80 @@ class FixedAsset(db.Model):
 
     # New relationship with Category
     category_rel = db.relationship("Category", back_populates="assets")
-    #transactions = db.relationship("AssetTransaction", back_populates="asset", cascade="all, delete-orphan")
+    asset_transactions = db.relationship("AssetTransaction", back_populates="asset", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<FixedAsset {self.id} {self.name_en or self.name_ar}>"
 
-# class AssetTransaction(db.Model):
-#     __tablename__ = "asset_transactions"
-#     id = db.Column(db.Integer, primary_key=True)
 
-#     asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="CASCADE"), nullable=False)
-#     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))  # who added
-#     quantity_added = db.Column(db.Integer, nullable=False)
-#     created_at = db.Column(db.DateTime, default=db.func.now())
+class Transaction(db.Model):
+    __tablename__ = "transactions"
+    id = db.Column(db.Integer, primary_key=True)  # Automatic ID
+    custom_id = db.Column(db.String(50), unique=True, nullable=False)  # Format: "BRANCH_ID-TRANSACTION_ID"
+    date = db.Column(db.Date, nullable=False, default=datetime.utcnow().date)
+    description = db.Column(db.Text, nullable=True)
+    reference_number = db.Column(db.String(100), nullable=True)
+    warehouse_id = db.Column(db.Integer, db.ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False)
+    attached_file = db.Column(db.String(500), nullable=True)  # File path/URL
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    warehouse = db.relationship("Warehouse", back_populates="transactions")
+    asset_transactions = db.relationship("AssetTransaction", back_populates="transaction", cascade="all, delete-orphan")
 
-#     # Relationships
-#     asset = db.relationship("FixedAsset", back_populates="transactions")
-#     user = db.relationship("User", back_populates="asset_transactions")
-#     files = db.relationship("AssetTransactionFile", back_populates="transaction", cascade="all, delete-orphan")
+    def __repr__(self):
+        return f"<Transaction {self.custom_id} - {self.description[:50]}>"
+
+    @property
+    def branch(self):
+        """Get branch through warehouse relationship"""
+        return self.warehouse.branch if self.warehouse else None
+
+    @staticmethod
+    def generate_custom_id(branch_id):
+        """Generate custom ID in format: BRANCH_ID-TRANSACTION_COUNT"""
+        # Count existing transactions for this branch
+        from sqlalchemy import func
+        count = db.session.query(func.count(Transaction.id)).join(Warehouse).filter(
+            Warehouse.branch_id == branch_id
+        ).scalar() or 0
+        
+        return f"{branch_id}-{count + 1}"
 
 
-# class AssetTransactionFile(db.Model):
-#     __tablename__ = "asset_transaction_files"
-#     id = db.Column(db.Integer, primary_key=True)
+class AssetTransaction(db.Model):
+    __tablename__ = "asset_transactions"
+    id = db.Column(db.Integer, primary_key=True)
+    transaction_id = db.Column(db.Integer, db.ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False)
+    asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="RESTRICT"), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+    amount = db.Column(Numeric(10, 2), nullable=True)  # Using Numeric for monetary values
+    total_value = db.Column(Numeric(12, 2), nullable=True)  # Calculated: quantity * amount
+    transaction_type = db.Column(db.Boolean, nullable=False)  # True for IN, False for OUT
+    
+    # Relationships
+    transaction = db.relationship("Transaction", back_populates="asset_transactions")
+    asset = db.relationship("FixedAsset", back_populates="asset_transactions")
 
-#     transaction_id = db.Column(db.Integer, db.ForeignKey("asset_transactions.id", ondelete="CASCADE"), nullable=False)
-#     file_path = db.Column(db.String(255), nullable=False)  # path in your uploads folder
-#     uploaded_at = db.Column(db.DateTime, default=db.func.now())
+    def __repr__(self):
+        type_str = "IN" if self.transaction_type else "OUT"
+        return f"<AssetTransaction {self.id} - Asset:{self.asset_id} Qty:{self.quantity} Total:{self.total_value} Type:{type_str}>"
 
-#     # Relationship
-#     transaction = db.relationship("AssetTransaction", back_populates="files")
+    @property
+    def type_display(self):
+        """Human readable transaction type"""
+        return "IN" if self.transaction_type else "OUT"
+
+    def calculate_total_value(self):
+        """Calculate and update total_value based on quantity * amount"""
+        if self.quantity is not None and self.amount is not None:
+            self.total_value = self.quantity * self.amount
+        else:
+            self.total_value = None
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.calculate_total_value()
 
 
 class JobDescription(db.Model):

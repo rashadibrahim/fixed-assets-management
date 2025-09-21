@@ -1,5 +1,6 @@
-from marshmallow import Schema, fields, validates, ValidationError
-from .models import db, Category, Branch
+from marshmallow import Schema, fields, validates, ValidationError, post_load
+from decimal import Decimal
+from .models import db, Category, Branch, Warehouse, FixedAsset, Transaction
 
 
 class BranchSchema(Schema):
@@ -17,11 +18,13 @@ class WarehouseSchema(Schema):
     name_en = fields.Str(required=True)
     address_ar = fields.Str(required=True)
     address_en = fields.Str(required=True)
+    
     @validates("branch_id")
-    def validate_branch(self, value, **kwargs):  # <-- add **kwargs here
-        branch = db.session.get(Branch, value)  # SQLAlchemy 2.0 way
+    def validate_branch(self, value, **kwargs):
+        branch = db.session.get(Branch, value)
         if branch is None:
             raise ValidationError("Invalid branch_id: branch does not exist.")
+
 
 class CategorySchema(Schema):
     id = fields.Int(dump_only=True)
@@ -40,9 +43,118 @@ class FixedAssetSchema(Schema):
 
     @validates("category_id")
     def validate_category(self, value, **kwargs):
-        category = db.session.get(Category, value)  # SQLAlchemy 2.0 way
+        category = db.session.get(Category, value)
         if category is None:
             raise ValidationError("Invalid category_id: category does not exist.")
+
+
+class TransactionSchema(Schema):
+    id = fields.Int(dump_only=True)
+    custom_id = fields.Str(dump_only=True)  # Generated automatically
+    date = fields.Date(required=True)
+    description = fields.Str(allow_none=True)
+    reference_number = fields.Str(allow_none=True)
+    warehouse_id = fields.Int(required=True)
+    attached_file = fields.Str(allow_none=True)
+    created_at = fields.DateTime(dump_only=True)
+    
+    # Nested relationships for response
+    warehouse = fields.Nested(WarehouseSchema, dump_only=True)
+    asset_transactions = fields.Nested('AssetTransactionSchema', many=True, dump_only=True)
+    
+    @validates("warehouse_id")
+    def validate_warehouse(self, value, **kwargs):
+        warehouse = db.session.get(Warehouse, value)
+        if warehouse is None:
+            raise ValidationError("Invalid warehouse_id: warehouse does not exist.")
+
+
+class AssetTransactionSchema(Schema):
+    id = fields.Int(dump_only=True)
+    transaction_id = fields.Int(dump_only=True)  # Bound to Transaction.id (primary key)
+    asset_id = fields.Int(required=True)
+    quantity = fields.Int(required=True)
+    amount = fields.Float()
+    total_value = fields.Float(dump_only=True)  # Calculated field
+    transaction_type = fields.Bool(required=True)
+    
+    # Helper field for display
+    type_display = fields.Str(dump_only=True)
+    
+    # Nested relationships for response
+    asset = fields.Nested(FixedAssetSchema, dump_only=True)
+    
+    @validates("asset_id")
+    def validate_asset(self, value, **kwargs):
+        asset = db.session.get(FixedAsset, value)
+        if asset is None:
+            raise ValidationError("Invalid asset_id: asset does not exist.")
+    
+    @validates("quantity")
+    def validate_quantity(self, value, **kwargs):
+        if value <= 0:
+            raise ValidationError("Quantity must be greater than 0.")
+    
+    @validates("amount")
+    def validate_amount(self, value, **kwargs):
+        if value is not None and value < 0:
+            raise ValidationError("Amount cannot be negative.")
+
+
+class TransactionCreateSchema(Schema):
+    """Schema for creating transactions with nested asset transactions"""
+    date = fields.Date(required=True)
+    description = fields.Str(allow_none=True)
+    reference_number = fields.Str(allow_none=True)
+    warehouse_id = fields.Int(required=True)
+    attached_file = fields.Str(allow_none=True)
+    asset_transactions = fields.Nested('AssetTransactionCreateSchema', many=True, required=True)
+    
+    @validates("warehouse_id")
+    def validate_warehouse(self, value, **kwargs):
+        warehouse = db.session.get(Warehouse, value)
+        if warehouse is None:
+            raise ValidationError("Invalid warehouse_id: warehouse does not exist.")
+    
+    @validates("asset_transactions")
+    def validate_asset_transactions(self, value, **kwargs):
+        if not value or len(value) == 0:
+            raise ValidationError("At least one asset transaction is required.")
+
+    @staticmethod
+    def generate_branch_specific_transaction_id(branch_id):
+        """Generate branch-specific transaction ID like '1-1', '1-2', etc."""
+        # Count existing transactions for this branch
+        from sqlalchemy import func
+        count = db.session.query(func.count(Transaction.id)).join(Warehouse).filter(
+            Warehouse.branch_id == branch_id
+        ).scalar() or 0
+        
+        return f"{branch_id}-{count + 1}"
+
+
+class AssetTransactionCreateSchema(Schema):
+    """Schema for creating asset transactions (without transaction_id)"""
+    asset_id = fields.Int(required=True)
+    quantity = fields.Int(required=True)
+    amount = fields.Decimal(places=2, allow_none=True)
+    transaction_type = fields.Bool(required=True)
+    
+    @validates("asset_id")
+    def validate_asset(self, value, **kwargs):
+        asset = db.session.get(FixedAsset, value)
+        if asset is None:
+            raise ValidationError("Invalid asset_id: asset does not exist.")
+    
+    @validates("quantity")
+    def validate_quantity(self, value, **kwargs):
+        if value <= 0:
+            raise ValidationError("Quantity must be greater than 0.")
+    
+    @validates("amount")
+    def validate_amount(self, value, **kwargs):
+        if value is not None and value < 0:
+            raise ValidationError("Amount cannot be negative.")
 
 
 class JobDescriptionSchema(Schema):
