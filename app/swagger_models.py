@@ -100,6 +100,13 @@ asset_input_model = api.model('FixedAssetInput', {
     'is_active': fields.Boolean(description='Whether the asset is active', default=True)
 })
 
+asset_search_response_model = api.model('AssetSearchResponse', {
+    'items': fields.List(fields.Nested(asset_model), description='List of found assets'),
+    'total': fields.Integer(description='Total number of matching assets'),
+    'page': fields.Integer(description='Current page number'),
+    'pages': fields.Integer(description='Total number of pages')
+})
+
 # User models
 user_model = api.model('User', {
     'id': fields.Integer(readonly=True, description='User unique identifier'),
@@ -265,4 +272,16 @@ transaction_summary_model = api.model('TransactionSummary', {
     'total_in_value': fields.Float(description='Total value of IN transactions'),
     'total_out_value': fields.Float(description='Total value of OUT transactions'),
     'net_value': fields.Float(description='Net value (IN - OUT)')
+})
+
+
+transaction_create_base64_model = api.model('TransactionCreateBase64', {
+    'date': fields.Date(required=True, description='Transaction date'),
+    'description': fields.String(description='Transaction description'),
+    'reference_number': fields.String(description='Reference number'),
+    'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
+    'attached_file_base64': fields.String(description='Base64 encoded file content'),
+    'attached_file_name': fields.String(description='Original filename (for extension detection)'),
+    'asset_transactions': fields.List(fields.Nested(asset_transaction_input_create), 
+                                     required=True, description='Asset transactions', min_items=1)
 })

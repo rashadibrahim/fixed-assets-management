@@ -1,3 +1,4 @@
+from sqlalchemy import or_
 from flask import Blueprint, request, jsonify
 from flask_restx import Resource
 from marshmallow import ValidationError
@@ -9,7 +10,7 @@ from ..utils import check_permission, generate_barcode, generate_unique_product_
 from ..swagger import assets_ns, categories_ns, add_standard_responses, api
 from ..swagger_models import (
     asset_model, asset_input_model, category_model, category_input_model,
-    pagination_model, error_model, success_model, barcode_model
+    pagination_model, error_model, success_model, barcode_model, asset_search_response_model
 )
 
 bp = Blueprint("assets", __name__, url_prefix="/assets")
@@ -260,3 +261,87 @@ class AssetResource(Resource):
 
 
 
+# Searching Endpoint
+@assets_ns.route("/search")
+class AssetSearch(Resource):
+    @assets_ns.doc('search_assets', security='Bearer Auth')
+    @assets_ns.param('q', 'Search query (text for name search or number for barcode search)', required=True, type=str)
+    @assets_ns.param('page', 'Page number', type=int, default=1)
+    @assets_ns.param('per_page', 'Items per page', type=int, default=10)
+    @assets_ns.marshal_with(asset_search_response_model)
+    @assets_ns.response(400, 'Missing Search Query', error_model)
+    @jwt_required()
+    def get(self):
+        """Search assets by name (text) or product code/barcode (number)
+        
+        - If query contains letters: searches in name_ar and name_en fields
+        - If query is numeric: searches by exact product_code match
+        """
+        error = check_permission("can_read_asset")
+        if error:
+            return error
+
+        search_query = request.args.get('q', '').strip()
+        if not search_query:
+            return {"error": "Search query parameter 'q' is required"}, 400
+
+        page = request.args.get("page", 1, type=int)
+        per_page = request.args.get("per_page", 10, type=int)
+
+        try:
+            # Build base query
+            query = FixedAsset.query.filter(FixedAsset.is_active == True)
+            
+            
+            # Determine search type and build search conditions
+            search_conditions = []
+            
+            # Check if query is purely numeric (for barcode search)
+            if search_query.isdigit():
+                # Pure number - search by product_code (exact match)
+                search_conditions.append(FixedAsset.product_code == search_query)
+            else:
+                # Contains letters - search by name (partial match, case-insensitive)
+                name_search = f"%{search_query}%"
+                search_conditions.extend([
+                    FixedAsset.name_ar.ilike(name_search),
+                    FixedAsset.name_en.ilike(name_search)
+                ])
+                
+                # Also check if it might be a product_code (partial match)
+                if search_query.replace('-', '').replace('_', '').isalnum():
+                    search_conditions.append(FixedAsset.product_code.ilike(f"%{search_query}%"))
+            
+            # Apply search conditions with OR logic
+            if search_conditions:
+                query = query.filter(or_(*search_conditions))
+            else:
+                # If no conditions, return empty result
+                return {
+                    "items": [],
+                    "total": 0,
+                    "page": page,
+                    "pages": 0
+                }
+            
+            # Order results
+            if search_query.isdigit():
+                # For numeric queries, order by product_code match, then by name
+                query = query.order_by(FixedAsset.product_code, FixedAsset.name_en)
+            else:
+                # For text queries, order by name
+                query = query.order_by(FixedAsset.name_en, FixedAsset.name_ar)
+            
+            # Execute paginated query
+            paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+            
+            return {
+                "items": assets_schema.dump(paginated.items),
+                "total": paginated.total,
+                "page": paginated.page,
+                "pages": paginated.pages
+            }
+            
+        except Exception as e:
+            print(f"Search error: {str(e)}")
+            return {"error": f"Search error: {str(e)}"}, 500
