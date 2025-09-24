@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file, abort
 from flask_restx import Resource
 from marshmallow import ValidationError
 from datetime import datetime, date
@@ -284,6 +284,9 @@ class TransactionResource(Resource):
         if not transaction:
             return {"error": "Transaction not found"}, 404
         return transaction_schema.dump(transaction)
+
+    # ...existing code...
+
 
     @transactions_ns.doc('update_transaction', security='Bearer Auth')
     @transactions_ns.expect(transaction_input_model)
@@ -662,3 +665,32 @@ class TransactionSummary(Resource):
             "total_out_value": float(total_out_value),
             "net_value": float(total_in_value - total_out_value)
         }
+    
+
+# New Resource for downloading transaction file
+@transactions_ns.route('/<int:transaction_id>/download')
+class TransactionDownloadResource(Resource):
+    @transactions_ns.doc('download_transaction_file', security='Bearer Auth')
+    @jwt_required()
+    def get(self, transaction_id):
+        """Download the attached file for a transaction"""
+        error = check_permission("can_read_asset")
+        if error:
+            return error
+
+        transaction = db.session.get(Transaction, transaction_id)
+        if not transaction:
+            return {"error": "Transaction not found"}, 404
+
+        if not transaction.attached_file:
+            return {"error": "No file attached to this transaction."}, 404
+
+        file_path = transaction.attached_file
+        # If file path is not absolute, assume uploads folder
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(current_app.root_path, '..', 'uploads', file_path)
+
+        if not os.path.exists(file_path):
+            return {"error": "File not found."}, 404
+
+        return send_file(file_path, as_attachment=True)
