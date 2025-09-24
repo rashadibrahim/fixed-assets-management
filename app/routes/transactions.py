@@ -4,6 +4,12 @@ from marshmallow import ValidationError
 from datetime import datetime, date
 from sqlalchemy import and_, or_
 from .. import db
+import os
+import uuid
+import json
+from werkzeug.utils import secure_filename
+from flask import request, current_app
+from flask_restx import Resource, reqparse
 from ..models import Transaction, AssetTransaction, Warehouse, FixedAsset, Branch
 from ..schemas import (
     TransactionSchema, TransactionCreateSchema, 
@@ -17,6 +23,7 @@ from ..swagger_models import (
     asset_transaction_model, asset_transaction_input_model,
     pagination_model, error_model, success_model
 )
+from werkzeug.datastructures import FileStorage
 
 bp = Blueprint("transactions", __name__, url_prefix="/transactions")
 
@@ -27,6 +34,32 @@ transaction_create_schema = TransactionCreateSchema()
 asset_transaction_schema = AssetTransactionSchema()
 asset_transactions_schema = AssetTransactionSchema(many=True)
 asset_transaction_create_schema = AssetTransactionCreateSchema()
+file_upload_parser = reqparse.RequestParser()
+file_upload_parser.add_argument('attached_file', 
+                               location='files',
+                               type=FileStorage,
+                               required=False,
+                               help='File attachment')
+file_upload_parser.add_argument('data', 
+                               location='form',
+                               type=str,
+                               required=False,
+                               help='''Transaction data as JSON string. Example:
+{
+  "date": "2025-09-24",
+  "description": "string", 
+  "reference_number": "string",
+  "warehouse_id": 0,
+  "asset_transactions": [
+    {
+      "asset_id": 0,
+      "quantity": 1,
+      "amount": 0,
+      "transaction_type": true
+    }
+  ]
+}''')
+
 
 
 @transactions_ns.route("/")
@@ -95,19 +128,78 @@ class TransactionList(Resource):
             "page": paginated.page,
             "pages": paginated.pages
         }
+    
 
     @transactions_ns.doc('create_transaction', security='Bearer Auth')
-    @transactions_ns.expect(transaction_create_model)
+    #@transactions_ns.expect(transaction_create_model)
+    @transactions_ns.expect(file_upload_parser)
     @transactions_ns.marshal_with(transaction_model, code=201)
     @jwt_required()
     def post(self):
         """Create a new transaction with asset transactions"""
-        error = check_permission("can_edit_asset")  # Using asset permission for now
+        error = check_permission("can_edit_asset")
         if error:
             return error
 
         try:
-            data = transaction_create_schema.load(request.get_json())
+            print("Starting transaction creation process")
+            
+            # Handle file upload
+            attached_file_name = None
+            
+            # Check if request has files
+            if 'attached_file' in request.files:
+                file = request.files['attached_file']
+                
+                if file and file.filename and file.filename.strip():
+                    try:
+                        print(f"Processing file: {file.filename}")
+                        # Generate unique filename
+                        file_extension = os.path.splitext(secure_filename(file.filename))[1]
+                        unique_filename = f"{uuid.uuid4().hex}{file_extension}"
+                        
+                        # Create upload directory if it doesn't exist
+                        upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+                        os.makedirs(upload_folder, exist_ok=True)
+                        
+                        # Save file
+                        file_path = os.path.join(upload_folder, unique_filename)
+                        file.save(file_path)
+                        attached_file_name = unique_filename
+                        print(f"File saved as: {unique_filename}")
+                        
+                    except Exception as e:
+                        print(f"File upload error: {str(e)}")
+                        return {"error": f"File upload failed: {str(e)}"}, 400
+            
+            # Handle JSON data
+            try:
+                # For multipart requests, JSON data might be in a form field
+                if request.content_type and 'multipart/form-data' in request.content_type:
+                    # Try to get JSON from form data
+                    json_str = request.form.get('data')
+                    if json_str:
+                        json_data = json.loads(json_str)
+                    else:
+                        return {"error": "No transaction data provided in multipart request"}, 400
+                else:
+                    # Regular JSON request
+                    json_data = request.get_json()
+                    if not json_data:
+                        return {"error": "No JSON data provided"}, 400
+                
+                data = transaction_create_schema.load(json_data)
+                print("Transaction data validated successfully")
+                
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {str(e)}")
+                return {"error": f"Invalid JSON format: {str(e)}"}, 400
+            except ValidationError as e:
+                print(f"Schema validation error: {str(e)}")
+                return {"error": f"Data validation failed: {str(e)}"}, 400
+            except Exception as e:
+                print(f"Data processing error: {str(e)}")
+                return {"error": f"Data processing failed: {str(e)}"}, 400
             
             # Get warehouse to determine branch
             warehouse = db.session.get(Warehouse, data['warehouse_id'])
@@ -124,7 +216,7 @@ class TransactionList(Resource):
                 'description': data.get('description'),
                 'reference_number': data.get('reference_number'),
                 'warehouse_id': data['warehouse_id'],
-                'attached_file': data.get('attached_file')
+                'attached_file': attached_file_name  # Store the unique filename
             }
             
             new_transaction = Transaction(**transaction_data)
@@ -146,7 +238,7 @@ class TransactionList(Resource):
                         db.session.rollback()
                         return {
                             "error": f"Insufficient quantity for asset {asset.name_en}. "
-                                   f"Available: {asset.quantity}, Requested: {asset_trans_data['quantity']}"
+                                f"Available: {asset.quantity}, Requested: {asset_trans_data['quantity']}"
                         }, 400
                 
                 # Update asset quantity
@@ -171,10 +263,9 @@ class TransactionList(Resource):
             
             return transaction_schema.dump(new_transaction), 201
             
-        except ValidationError as err:
-            return {"errors": err.messages}, 400
         except Exception as e:
             db.session.rollback()
+            print(f"Unexpected error: {str(e)}")
             return {"error": str(e)}, 500
 
 

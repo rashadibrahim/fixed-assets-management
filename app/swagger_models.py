@@ -274,14 +274,3 @@ transaction_summary_model = api.model('TransactionSummary', {
     'net_value': fields.Float(description='Net value (IN - OUT)')
 })
 
-
-transaction_create_base64_model = api.model('TransactionCreateBase64', {
-    'date': fields.Date(required=True, description='Transaction date'),
-    'description': fields.String(description='Transaction description'),
-    'reference_number': fields.String(description='Reference number'),
-    'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
-    'attached_file_base64': fields.String(description='Base64 encoded file content'),
-    'attached_file_name': fields.String(description='Original filename (for extension detection)'),
-    'asset_transactions': fields.List(fields.Nested(asset_transaction_input_create), 
-                                     required=True, description='Asset transactions', min_items=1)
-})
