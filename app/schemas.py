@@ -29,7 +29,7 @@ class WarehouseSchema(Schema):
 class CategorySchema(Schema):
     id = fields.Int(dump_only=True)
     category = fields.Str(required=True)
-    subcategory = fields.Str(required=True)
+    subcategory = fields.Str(required=False, allow_none=True)
 
 
 class FixedAssetSchema(Schema):
@@ -47,7 +47,6 @@ class FixedAssetSchema(Schema):
         if category is None:
             raise ValidationError("Invalid category_id: category does not exist.")
 
-
 class TransactionSchema(Schema):
     id = fields.Int(dump_only=True)
     custom_id = fields.Str(dump_only=True)  # Generated automatically
@@ -55,11 +54,14 @@ class TransactionSchema(Schema):
     description = fields.Str(allow_none=True)
     reference_number = fields.Str(allow_none=True)
     warehouse_id = fields.Int(required=True)
+    user_id = fields.Int(dump_only=True)  # NEW: Show which user created the transaction
     attached_file = fields.Str(allow_none=True)
+    transaction_type = fields.Bool(required=True)  # True for IN, False for OUT
     created_at = fields.DateTime(dump_only=True)
     
     # Nested relationships for response
     warehouse = fields.Nested(WarehouseSchema, dump_only=True)
+    user = fields.Nested('UserSchema', dump_only=True)  # NEW: Show user info
     asset_transactions = fields.Nested('AssetTransactionSchema', many=True, dump_only=True)
     
     @validates("warehouse_id")
@@ -76,10 +78,6 @@ class AssetTransactionSchema(Schema):
     quantity = fields.Int(required=True)
     amount = fields.Float()
     total_value = fields.Float(dump_only=True)  # Calculated field
-    transaction_type = fields.Bool(required=True)
-    
-    # Helper field for display
-    type_display = fields.Str(dump_only=True)
     
     # Nested relationships for response
     asset = fields.Nested(FixedAssetSchema, dump_only=True)
@@ -107,7 +105,9 @@ class TransactionCreateSchema(Schema):
     description = fields.Str(allow_none=True)
     reference_number = fields.Str(allow_none=True)
     warehouse_id = fields.Int(required=True)
+    # NOTE: user_id is NOT included here - it should be set from the current authenticated user in the view
     attached_file = fields.Str(allow_none=True)
+    transaction_type = fields.Bool(required=True)  # True for IN, False for OUT
     asset_transactions = fields.Nested('AssetTransactionCreateSchema', many=True, required=True)
     
     @validates("warehouse_id")
@@ -138,7 +138,6 @@ class AssetTransactionCreateSchema(Schema):
     asset_id = fields.Int(required=True)
     quantity = fields.Int(required=True)
     amount = fields.Decimal(places=2, allow_none=True)
-    transaction_type = fields.Bool(required=True)
     
     @validates("asset_id")
     def validate_asset(self, value, **kwargs):

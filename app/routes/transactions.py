@@ -15,7 +15,7 @@ from ..schemas import (
     TransactionSchema, TransactionCreateSchema, 
     AssetTransactionSchema, AssetTransactionCreateSchema
 )
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from ..utils import check_permission
 from ..swagger import transactions_ns, asset_transactions_ns, add_standard_responses, api
 from ..swagger_models import (
@@ -24,7 +24,7 @@ from ..swagger_models import (
     pagination_model, error_model, success_model
 )
 from werkzeug.datastructures import FileStorage
-
+from sqlalchemy.orm import noload
 bp = Blueprint("transactions", __name__, url_prefix="/transactions")
 
 # Initialize schemas
@@ -50,12 +50,12 @@ file_upload_parser.add_argument('data',
   "description": "string", 
   "reference_number": "string",
   "warehouse_id": 0,
+  "transaction_type": true,
   "asset_transactions": [
     {
       "asset_id": 0,
       "quantity": 1,
-      "amount": 0,
-      "transaction_type": true
+      "amount": 0
     }
   ]
 }''')
@@ -89,8 +89,12 @@ class TransactionList(Resource):
         search = request.args.get("search", "")
 
         # Build query with joins
-        query = Transaction.query.join(Warehouse)
-
+        # query = Transaction.query.join(Warehouse)
+        query = (
+    Transaction.query
+    .options(noload(Transaction.asset_transactions), noload(Transaction.user))  # exclude relationships
+    .join(Warehouse)
+)
         # Apply filters
         if branch_id:
             query = query.filter(Warehouse.branch_id == branch_id)
@@ -215,7 +219,9 @@ class TransactionList(Resource):
                 'date': data['date'],
                 'description': data.get('description'),
                 'reference_number': data.get('reference_number'),
+                'user_id': get_jwt_identity(),  # Assuming you want to track the user creating the transaction
                 'warehouse_id': data['warehouse_id'],
+                'transaction_type': data['transaction_type'],  # Now at transaction level
                 'attached_file': attached_file_name  # Store the unique filename
             }
             
@@ -225,6 +231,7 @@ class TransactionList(Resource):
             
             # Create asset transactions and update asset quantities
             asset_transactions = []
+            transaction_type = data['transaction_type']  # Get transaction type once
             for asset_trans_data in data['asset_transactions']:
                 # Get the asset
                 asset = db.session.get(FixedAsset, asset_trans_data['asset_id'])
@@ -233,7 +240,7 @@ class TransactionList(Resource):
                     return {"error": f"Asset {asset_trans_data['asset_id']} not found"}, 404
                 
                 # Check if OUT transaction has enough quantity
-                if not asset_trans_data['transaction_type']:  # OUT transaction
+                if not transaction_type:  # OUT transaction
                     if asset.quantity < asset_trans_data['quantity']:
                         db.session.rollback()
                         return {
@@ -242,7 +249,7 @@ class TransactionList(Resource):
                         }, 400
                 
                 # Update asset quantity
-                if asset_trans_data['transaction_type']:  # IN transaction
+                if transaction_type:  # IN transaction
                     asset.quantity += asset_trans_data['quantity']
                 else:  # OUT transaction
                     asset.quantity -= asset_trans_data['quantity']
@@ -252,8 +259,7 @@ class TransactionList(Resource):
                     transaction_id=new_transaction.id,
                     asset_id=asset_trans_data['asset_id'],
                     quantity=asset_trans_data['quantity'],
-                    amount=asset_trans_data.get('amount'),
-                    transaction_type=asset_trans_data['transaction_type']
+                    amount=asset_trans_data.get('amount')
                 )
                 # Calculate total_value automatically via the model's __init__
                 asset_transactions.append(asset_trans)
@@ -285,7 +291,7 @@ class TransactionResource(Resource):
             return {"error": "Transaction not found"}, 404
         return transaction_schema.dump(transaction)
 
-    # ...existing code...
+
 
 
     @transactions_ns.doc('update_transaction', security='Bearer Auth')
@@ -335,10 +341,11 @@ class TransactionResource(Resource):
 
         try:
             # Before deleting transaction, reverse all asset quantity changes
+            transaction_type = transaction.transaction_type  # Get transaction type once
             for asset_trans in transaction.asset_transactions:
                 asset = db.session.get(FixedAsset, asset_trans.asset_id)
                 if asset:
-                    if asset_trans.transaction_type:  # Was IN transaction
+                    if transaction_type:  # Was IN transaction
                         asset.quantity -= asset_trans.quantity  # Remove the added quantity
                     else:  # Was OUT transaction
                         asset.quantity += asset_trans.quantity  # Add back the removed quantity
@@ -357,7 +364,6 @@ class TransactionAssetsList(Resource):
     @transactions_ns.marshal_with(pagination_model)
     @transactions_ns.param('page', 'Page number', type=int, default=1)
     @transactions_ns.param('per_page', 'Items per page', type=int, default=10)
-    @transactions_ns.param('transaction_type', 'Filter by transaction type (true for IN, false for OUT)', type=bool)
     @jwt_required()
     def get(self, transaction_id):
         """Get all asset transactions for a specific transaction"""
@@ -372,12 +378,8 @@ class TransactionAssetsList(Resource):
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
-        transaction_type = request.args.get("transaction_type", type=bool)
 
         query = AssetTransaction.query.filter_by(transaction_id=transaction_id)
-        
-        if transaction_type is not None:
-            query = query.filter_by(transaction_type=transaction_type)
 
         paginated = query.paginate(page=page, per_page=per_page)
         return {
@@ -410,8 +412,11 @@ class TransactionAssetsList(Resource):
             if not asset:
                 return {"error": "Asset not found"}, 404
             
+            # Use the parent transaction's transaction_type
+            transaction_type = transaction.transaction_type
+            
             # Check if OUT transaction has enough quantity
-            if not data['transaction_type']:  # OUT transaction
+            if not transaction_type:  # OUT transaction
                 if asset.quantity < data['quantity']:
                     return {
                         "error": f"Insufficient quantity for asset {asset.name_en}. "
@@ -419,7 +424,7 @@ class TransactionAssetsList(Resource):
                     }, 400
             
             # Update asset quantity
-            if data['transaction_type']:  # IN transaction
+            if transaction_type:  # IN transaction
                 asset.quantity += data['quantity']
             else:  # OUT transaction
                 asset.quantity -= data['quantity']
@@ -428,8 +433,7 @@ class TransactionAssetsList(Resource):
                 transaction_id=transaction_id,
                 asset_id=data['asset_id'],
                 quantity=data['quantity'],
-                amount=data.get('amount'),
-                transaction_type=data['transaction_type']
+                amount=data.get('amount')
             )
             
             db.session.add(asset_transaction)
@@ -480,12 +484,14 @@ class AssetTransactionResource(Resource):
             
             # Get current values before update
             old_quantity = asset_transaction.quantity
-            old_transaction_type = asset_transaction.transaction_type
             old_asset_id = asset_transaction.asset_id
+            
+            # Get the parent transaction's transaction_type (since it's no longer in asset_transaction)
+            parent_transaction = asset_transaction.transaction
+            transaction_type = parent_transaction.transaction_type
             
             # Get new values
             new_quantity = data.get('quantity', old_quantity)
-            new_transaction_type = data.get('transaction_type', old_transaction_type)
             new_asset_id = data.get('asset_id', old_asset_id)
             
             # If asset_id changed, we need to handle both assets
@@ -493,7 +499,7 @@ class AssetTransactionResource(Resource):
                 # Reverse the effect on the old asset
                 old_asset = db.session.get(FixedAsset, old_asset_id)
                 if old_asset:
-                    if old_transaction_type:  # Was IN transaction
+                    if transaction_type:  # Was IN transaction
                         old_asset.quantity -= old_quantity  # Remove the added quantity
                     else:  # Was OUT transaction
                         old_asset.quantity += old_quantity  # Add back the removed quantity
@@ -504,7 +510,7 @@ class AssetTransactionResource(Resource):
                     return {"error": "New asset not found"}, 404
                 
                 # Check availability for new asset if OUT transaction
-                if not new_transaction_type:  # OUT transaction
+                if not transaction_type:  # OUT transaction
                     if new_asset.quantity < new_quantity:
                         return {
                             "error": f"Insufficient quantity for asset {new_asset.name_en}. "
@@ -512,26 +518,26 @@ class AssetTransactionResource(Resource):
                         }, 400
                 
                 # Apply effect to new asset
-                if new_transaction_type:  # IN transaction
+                if transaction_type:  # IN transaction
                     new_asset.quantity += new_quantity
                 else:  # OUT transaction
                     new_asset.quantity -= new_quantity
             
             else:
-                # Same asset, but quantity or type might have changed
+                # Same asset, but quantity might have changed
                 asset = db.session.get(FixedAsset, old_asset_id)
                 if asset:
                     # Reverse the old effect
-                    if old_transaction_type:  # Was IN transaction
+                    if transaction_type:  # Was IN transaction
                         asset.quantity -= old_quantity
                     else:  # Was OUT transaction
                         asset.quantity += old_quantity
                     
                     # Check availability for OUT transaction
-                    if not new_transaction_type:  # OUT transaction
+                    if not transaction_type:  # OUT transaction
                         if asset.quantity < new_quantity:
                             # Restore the old effect before returning error
-                            if old_transaction_type:
+                            if transaction_type:
                                 asset.quantity += old_quantity
                             else:
                                 asset.quantity -= old_quantity
@@ -541,7 +547,7 @@ class AssetTransactionResource(Resource):
                             }, 400
                     
                     # Apply the new effect
-                    if new_transaction_type:  # IN transaction
+                    if transaction_type:  # IN transaction
                         asset.quantity += new_quantity
                     else:  # OUT transaction
                         asset.quantity -= new_quantity
@@ -577,9 +583,13 @@ class AssetTransactionResource(Resource):
 
         try:
             # Before deleting, reverse the quantity effect on the asset
+            # Get the parent transaction's transaction_type
+            parent_transaction = asset_transaction.transaction
+            transaction_type = parent_transaction.transaction_type
+            
             asset = db.session.get(FixedAsset, asset_transaction.asset_id)
             if asset:
-                if asset_transaction.transaction_type:  # Was IN transaction
+                if transaction_type:  # Was IN transaction
                     asset.quantity -= asset_transaction.quantity  # Remove the added quantity
                 else:  # Was OUT transaction
                     asset.quantity += asset_transaction.quantity  # Add back the removed quantity
@@ -642,18 +652,18 @@ class TransactionSummary(Resource):
 
         # Calculate statistics
         total_transactions = transaction_query.count()
-        total_in_transactions = asset_transaction_query.filter(AssetTransaction.transaction_type == True).count()
-        total_out_transactions = asset_transaction_query.filter(AssetTransaction.transaction_type == False).count()
+        total_in_transactions = transaction_query.filter(Transaction.transaction_type == True).count()
+        total_out_transactions = transaction_query.filter(Transaction.transaction_type == False).count()
         
         # Calculate total values
         from sqlalchemy import func
         total_in_value = asset_transaction_query.filter(
-            AssetTransaction.transaction_type == True,
+            Transaction.transaction_type == True,
             AssetTransaction.total_value.isnot(None)
         ).with_entities(func.sum(AssetTransaction.total_value)).scalar() or 0
         
         total_out_value = asset_transaction_query.filter(
-            AssetTransaction.transaction_type == False,
+            Transaction.transaction_type == False,
             AssetTransaction.total_value.isnot(None)
         ).with_entities(func.sum(AssetTransaction.total_value)).scalar() or 0
 

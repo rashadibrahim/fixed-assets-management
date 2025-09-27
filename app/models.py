@@ -38,7 +38,7 @@ class Category(db.Model):
     __tablename__ = "categories"
     id = db.Column(db.Integer, primary_key=True)
     category = db.Column(db.String(100), nullable=False)
-    subcategory = db.Column(db.String(100), nullable=False)
+    subcategory = db.Column(db.String(100), nullable=True)
     
     # Relationship with FixedAsset
     assets = db.relationship("FixedAsset", back_populates="category_rel", cascade="all, delete-orphan")
@@ -73,11 +73,14 @@ class Transaction(db.Model):
     description = db.Column(db.Text, nullable=True)
     reference_number = db.Column(db.String(100), nullable=True)
     warehouse_id = db.Column(db.Integer, db.ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)  # NEW: Track who created the transaction
     attached_file = db.Column(db.String(500), nullable=True)  # File path/URL
+    transaction_type = db.Column(db.Boolean, nullable=False)  # True for IN, False for OUT
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
     warehouse = db.relationship("Warehouse", back_populates="transactions")
+    user = db.relationship("User", back_populates="transactions")  # NEW: Relationship to User
     asset_transactions = db.relationship("AssetTransaction", back_populates="transaction", cascade="all, delete-orphan")
 
     def __repr__(self):
@@ -108,20 +111,15 @@ class AssetTransaction(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     amount = db.Column(Numeric(10, 2), nullable=True)  # Using Numeric for monetary values
     total_value = db.Column(Numeric(12, 2), nullable=True)  # Calculated: quantity * amount
-    transaction_type = db.Column(db.Boolean, nullable=False)  # True for IN, False for OUT
     
     # Relationships
     transaction = db.relationship("Transaction", back_populates="asset_transactions")
     asset = db.relationship("FixedAsset", back_populates="asset_transactions")
 
     def __repr__(self):
-        type_str = "IN" if self.transaction_type else "OUT"
-        return f"<AssetTransaction {self.id} - Asset:{self.asset_id} Qty:{self.quantity} Total:{self.total_value} Type:{type_str}>"
+        return f"<AssetTransaction {self.id} - Asset:{self.asset_id} Qty:{self.quantity} Total:{self.total_value}>"
 
-    @property
-    def type_display(self):
-        """Human readable transaction type"""
-        return "IN" if self.transaction_type else "OUT"
+
 
     def calculate_total_value(self):
         """Calculate and update total_value based on quantity * amount"""
@@ -175,6 +173,9 @@ class User(db.Model):
     can_edit_asset = db.Column(db.Boolean, default=False)
     can_delete_asset = db.Column(db.Boolean, default=False)
     can_print_barcode = db.Column(db.Boolean, default=False)
+
+    # Relationships
+    transactions = db.relationship("Transaction", back_populates="user")  # NEW: One-to-many relationship with transactions
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

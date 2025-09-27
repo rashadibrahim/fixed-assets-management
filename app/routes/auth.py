@@ -22,8 +22,8 @@ class Signup(Resource):
     @auth_ns.expect(user_input_model)
     @auth_ns.marshal_with(user_model, code=201, description='Successfully created user')
     @auth_ns.response(400, 'Bad Request', error_model)
-    @jwt_required()
-    @admin_required
+    # @jwt_required()
+    # @admin_required
     def post(self):
         """Register a new user"""
         data = request.get_json()
@@ -84,7 +84,7 @@ class Login(Resource):
             return {"error": "Invalid email or password"}, 401
 
         access_token = create_access_token(
-            identity=str(user.id), expires_delta=datetime.timedelta(hours=1)
+            identity=str(user.id), expires_delta=datetime.timedelta(hours=5)
         )
         return {"access_token": access_token, "user": user_schema.dump(user)}
 

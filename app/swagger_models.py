@@ -213,8 +213,6 @@ asset_transaction_model = api.model('AssetTransaction', {
     'quantity': fields.Integer(required=True, description='Quantity'),
     'amount': fields.Float(description='Unit amount/price'),
     'total_value': fields.Float(description='Total value (quantity * amount)'),
-    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)'),
-    'type_display': fields.String(description='Transaction type display (IN/OUT)'),
     'asset': fields.Nested(asset_model, description='Asset details')
 })
 
@@ -226,9 +224,12 @@ transaction_model = api.model('Transaction', {
     'description': fields.String(description='Transaction description'),
     'reference_number': fields.String(description='Reference number'),
     'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
+    'user_id': fields.Integer(description='User ID who created the transaction'),
     'attached_file': fields.String(description='Attached file path/URL'),
+    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)'),
     'created_at': fields.DateTime(description='Creation timestamp'),
     'warehouse': fields.Nested(warehouse_model, description='Warehouse details'),
+    'user': fields.Nested(user_model, description='User who created the transaction'),
     'asset_transactions': fields.List(fields.Nested(asset_transaction_model), description='Asset transactions')
 })
 
@@ -237,14 +238,14 @@ transaction_input_model = api.model('TransactionInput', {
     'description': fields.String(description='Transaction description'),
     'reference_number': fields.String(description='Reference number'),
     'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
-    'attached_file': fields.String(description='Attached file path/URL')
+    'attached_file': fields.String(description='Attached file path/URL'),
+    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)')
 })
 
 asset_transaction_input_create = api.model('AssetTransactionInputCreate', {
     'asset_id': fields.Integer(required=True, description='Asset ID'),
     'quantity': fields.Integer(required=True, description='Quantity', min=1),
-    'amount': fields.Float(description='Unit amount/price'),
-    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)')
+    'amount': fields.Float(description='Unit amount/price')
 })
 
 transaction_create_model = api.model('TransactionCreate', {
@@ -253,6 +254,7 @@ transaction_create_model = api.model('TransactionCreate', {
     'reference_number': fields.String(description='Reference number'),
     'warehouse_id': fields.Integer(required=True, description='Warehouse ID'),
     'attached_file': fields.String(description='Attached file path/URL'),
+    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)'),
     'asset_transactions': fields.List(fields.Nested(asset_transaction_input_create), 
                                      required=True, description='Asset transactions', min_items=1)
 })
@@ -260,8 +262,7 @@ transaction_create_model = api.model('TransactionCreate', {
 asset_transaction_input_model = api.model('AssetTransactionInput', {
     'asset_id': fields.Integer(required=True, description='Asset ID'),
     'quantity': fields.Integer(required=True, description='Quantity', min=1),
-    'amount': fields.Float(description='Unit amount/price'),
-    'transaction_type': fields.Boolean(required=True, description='Transaction type (true=IN, false=OUT)')
+    'amount': fields.Float(description='Unit amount/price')
 })
 
 # Transaction Summary Model

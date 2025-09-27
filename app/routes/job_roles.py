@@ -46,8 +46,8 @@ class JobRoleList(Resource):
     @job_roles_ns.response(400, 'Bad Request', error_model)
     @job_roles_ns.response(401, 'Unauthorized', error_model)
     @job_roles_ns.response(403, 'Forbidden', error_model)
-    @jwt_required()
-    @admin_required
+    # @jwt_required()
+    # @admin_required
     def post(self):
         """Create a new job role (Admin only)"""
         data = request.get_json()
