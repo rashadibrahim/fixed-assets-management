@@ -7,8 +7,12 @@ from flask import current_app, jsonify
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from functools import wraps
 from .models import User, FixedAsset
-import barcode
-from barcode.writer import ImageWriter
+try:
+    from barcode.codex import Code128
+    from barcode.writer import ImageWriter
+    BARCODE_AVAILABLE = True
+except ImportError:
+    BARCODE_AVAILABLE = False
 
 # def save_upload(file_storage):
 #     """
@@ -108,20 +112,34 @@ def generate_barcode(product_code):
     """
     if not product_code:
         return None
+    
+    if not BARCODE_AVAILABLE:
+        return {
+            'product_code': product_code,
+            'barcode_image': None,
+            'error': 'Barcode library not available'
+        }
         
-    # Create a Code128 barcode (good for alphanumeric data)
-    code128 = barcode.get('code128', product_code, writer=ImageWriter())
-    
-    # Save the barcode to a bytes buffer instead of a file
-    buffer = io.BytesIO()
-    code128.write(buffer)
-    
-    # Get the bytes value and encode as base64
-    buffer.seek(0)
-    barcode_bytes = buffer.getvalue()
-    barcode_base64 = base64.b64encode(barcode_bytes).decode('utf-8')
-    
-    return {
-        'product_code': product_code,
-        'barcode_image': barcode_base64
-    }
+    try:
+        # Create a Code128 barcode (good for alphanumeric data)
+        code128 = Code128(product_code, writer=ImageWriter())
+        
+        # Save the barcode to a bytes buffer instead of a file
+        buffer = io.BytesIO()
+        code128.write(buffer)
+        
+        # Get the bytes value and encode as base64
+        buffer.seek(0)
+        barcode_bytes = buffer.getvalue()
+        barcode_base64 = base64.b64encode(barcode_bytes).decode('utf-8')
+        
+        return {
+            'product_code': product_code,
+            'barcode_image': barcode_base64
+        }
+    except Exception as e:
+        return {
+            'product_code': product_code,
+            'barcode_image': None,
+            'error': str(e)
+        }
