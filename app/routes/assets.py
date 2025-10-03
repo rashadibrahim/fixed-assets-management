@@ -1,7 +1,9 @@
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from flask import Blueprint, request, jsonify
 from flask_restx import Resource
 from marshmallow import ValidationError
+import logging
 from .. import db
 from ..models import FixedAsset, Category
 from ..schemas import FixedAssetSchema, CategorySchema
@@ -61,6 +63,26 @@ class CategoryList(Resource):
             return category_schema.dump(new_category), 201
         except ValidationError as err:
             return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            error_str = str(e.orig)
+            
+            if "duplicate key value violates unique constraint" in error_str:
+                return {
+                    "error": "Duplicate entry",
+                    "message": "A category with this information already exists in the system."
+                }, 400
+            else:
+                return {
+                    "error": "Database constraint violation",
+                    "message": "The data provided violates database constraints."
+                }, 400
+        except Exception as e:
+            db.session.rollback()
+            return {
+                "error": "Internal server error",
+                "message": "An unexpected error occurred while creating the category."
+            }, 500
 
 
 @categories_ns.route("/<int:category_id>")
@@ -101,6 +123,26 @@ class CategoryResource(Resource):
             return category_schema.dump(category)
         except ValidationError as err:
             return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            error_str = str(e.orig)
+            
+            if "duplicate key value violates unique constraint" in error_str:
+                return {
+                    "error": "Duplicate entry",
+                    "message": "A category with this information already exists in the system."
+                }, 400
+            else:
+                return {
+                    "error": "Database constraint violation",
+                    "message": "The data provided violates database constraints."
+                }, 400
+        except Exception as e:
+            db.session.rollback()
+            return {
+                "error": "Internal server error",
+                "message": "An unexpected error occurred while updating the category."
+            }, 500
 
     @categories_ns.doc('delete_category', security='Bearer Auth')
     @categories_ns.marshal_with(success_model)
@@ -163,14 +205,69 @@ class AssetList(Resource):
         if error:
             return error
 
+        data = request.get_json()
+        required_fields = ["name_ar", "name_en", "category_id", "is_active"]
+        missing = [field for field in required_fields if field not in data or data[field] in [None, ""]]
+        errors = {}
+        if missing:
+            errors["missing_fields"] = {
+                "message": "Required fields are missing.",
+                "fields": missing
+            }
+
+        # Validate quantity
+        if "quantity" in data and (not isinstance(data["quantity"], int) or data["quantity"] < 0):
+            errors["quantity"] = {
+                "message": "Quantity must be a non-negative integer.",
+                "value": data["quantity"]
+            }
+
+        # Validate category existence
+        from app.models import Category
+        if "category_id" in data:
+            category = db.session.get(Category, data["category_id"])
+            if not category:
+                errors["category_id"] = {
+                    "message": "Category does not exist.",
+                    "value": data["category_id"]
+                }
+
+        if errors:
+            return {"errors": errors}, 400
+
         try:
-            data = asset_schema.load(request.get_json())
-            new_asset = FixedAsset(**data)
+            asset_data = asset_schema.load(data)
+            new_asset = FixedAsset(**asset_data)
             db.session.add(new_asset)
             db.session.commit()
             return asset_schema.dump(new_asset), 201
         except ValidationError as err:
             return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            error_str = str(e.orig) if hasattr(e, 'orig') else str(e)
+            if "duplicate key value violates unique constraint" in error_str and "product_code" in error_str:
+                return {
+                    "error": "Product code already exists",
+                    "message": "The product code you provided is already in use. Please use a different product code.",
+                    "field": "product_code"
+                }, 400
+            elif "duplicate key value violates unique constraint" in error_str:
+                return {
+                    "error": "Duplicate entry",
+                    "message": "A record with this information already exists in the system."
+                }, 400
+            else:
+                return {
+                    "error": "Database constraint violation",
+                    "message": "The data provided violates database constraints."
+                }, 400
+        except Exception as e:
+            db.session.rollback()
+            return {
+                "error": "Internal server error",
+                "message": "An unexpected error occurred while creating the asset."
+            }, 500
 
 
 @assets_ns.route("/<int:asset_id>/barcode")
@@ -241,6 +338,46 @@ class AssetResource(Resource):
             return asset_schema.dump(asset)
         except ValidationError as err:
             return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            error_str = str(e.orig) if hasattr(e, 'orig') else str(e)
+            
+            if "duplicate key value violates unique constraint" in error_str and "product_code" in error_str:
+                return {
+                    "error": "Product code already exists",
+                    "message": "The product code you provided is already in use by another asset. Please use a different product code.",
+                    "field": "product_code"
+                }, 400
+            elif "duplicate key value violates unique constraint" in error_str:
+                return {
+                    "error": "Duplicate entry",
+                    "message": "A record with this information already exists in the system."
+                }, 400
+            else:
+                return {
+                    "error": "Database constraint violation",
+                    "message": "The data provided violates database constraints."
+                }, 400
+        except Exception as e:
+            db.session.rollback()
+            
+            # Check if it's actually an IntegrityError that wasn't caught above
+            if "duplicate key value violates unique constraint" in str(e) and "product_code" in str(e):
+                return {
+                    "error": "Product code already exists",
+                    "message": "The product code you provided is already in use by another asset. Please use a different product code.",
+                    "field": "product_code"
+                }, 400
+            elif "duplicate key value violates unique constraint" in str(e):
+                return {
+                    "error": "Duplicate entry",
+                    "message": "A record with this information already exists in the system."
+                }, 400
+            
+            return {
+                "error": "Internal server error",
+                "message": "An unexpected error occurred while updating the asset."
+            }, 500
 
     @assets_ns.doc('delete_asset', security='Bearer Auth')
     @assets_ns.marshal_with(success_model)

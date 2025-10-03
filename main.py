@@ -5,9 +5,13 @@ import logging
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Changed to WARNING to reduce noise
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# Set specific loggers to WARNING level to reduce noise
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy').setLevel(logging.WARNING)
 
 # Create app using the factory in app/__init__.py
 app = create_app()
@@ -20,13 +24,14 @@ with app.app_context():
     try:
         # Create all tables
         db.create_all()
-        logging.info("✅ Database tables created successfully")
+        print("✅ Database tables created successfully")
         
         # Verify connection by running a simple query
         result = db.session.execute(db.text("SELECT 1"))
-        logging.info("✅ Database connection verified")
+        print("✅ Database connection verified")
         
     except Exception as e:
+        print(f"❌ Database initialization failed: {e}")
         logging.error(f"❌ Database initialization failed: {e}")
         exit(1)
 
