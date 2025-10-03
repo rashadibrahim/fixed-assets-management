@@ -17,7 +17,8 @@ from ..schemas import (
     TransactionSchema, TransactionCreateSchema, 
     AssetTransactionSchema, AssetTransactionCreateSchema
 )
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required, verify_jwt_in_request, decode_token, get_jwt
+from flask_jwt_extended.exceptions import JWTExtendedException
 from ..utils import check_permission, error_response
 from ..swagger import transactions_ns, asset_transactions_ns, add_standard_responses, api
 from ..swagger_models import (
@@ -28,6 +29,33 @@ from ..swagger_models import (
 from werkzeug.datastructures import FileStorage
 from sqlalchemy.orm import noload
 bp = Blueprint("transactions", __name__, url_prefix="/transactions")
+
+def authenticate_for_download():
+    """
+    Custom authentication function for download endpoints.
+    Tries JWT header first, then token query parameter.
+    Returns user_id if authenticated, None otherwise.
+    """
+    # Try header-based JWT first
+    try:
+        verify_jwt_in_request()
+        return get_jwt_identity()
+    except JWTExtendedException:
+        pass
+    
+    # Try token query parameter
+    token = request.args.get('token')
+    if not token:
+        return None
+    
+    try:
+        decoded_token = decode_token(token)
+        # Extract user identity from the decoded token
+        return decoded_token.get('sub')  # 'sub' is the standard claim for user identity
+    except JWTExtendedException:
+        return None
+    except Exception:
+        return None
 
 # Initialize schemas
 transaction_schema = TransactionSchema()
@@ -102,13 +130,17 @@ class TransactionList(Resource):
             return {"error": "Items per page must be between 1 and 100"}, 400
 
         try:
-            # Build query with joins
-            # query = Transaction.query.join(Warehouse)
+            # Build query with joins and explicit relationship loading
+            from sqlalchemy.orm import joinedload
             query = (
-        Transaction.query
-        .options(noload(Transaction.asset_transactions), noload(Transaction.user))  # exclude relationships
-        .join(Warehouse)
-    )
+                Transaction.query
+                .options(
+                    noload(Transaction.asset_transactions), 
+                    noload(Transaction.user),
+                    joinedload(Transaction.warehouse)  # Explicitly load warehouse relationship
+                )
+                .join(Warehouse)
+            )
             # Apply filters
             if branch_id:
                 query = query.filter(Warehouse.branch_id == branch_id)
@@ -910,12 +942,23 @@ class TransactionDownloadResource(Resource):
     @transactions_ns.response(404, 'Transaction/File not found', error_model)
     @transactions_ns.response(500, 'Internal Server Error', error_model)
     @transactions_ns.response(503, 'Service Unavailable', error_model)
-    @jwt_required()
+    @transactions_ns.param('token', 'JWT token for authentication (alternative to Authorization header)', type=str)
     def get(self, transaction_id):
         """Download the attached file for a transaction"""
-        error = check_permission("can_make_transaction")
-        if error:
-            return error
+        # Authenticate user using custom function that handles both header and query token
+        user_id = authenticate_for_download()
+        
+        if not user_id:
+            return {"error": "Missing or invalid authentication. Provide Authorization header or token parameter."}, 401
+        
+        # Check user permissions
+        from ..models import User
+        user = User.query.get(user_id)
+        if not user:
+            return {"error": "User not found"}, 404
+            
+        if not getattr(user, "can_make_transaction", False):
+            return {"error": "Permission 'can_make_transaction' denied"}, 403
 
         try:
             transaction = db.session.get(Transaction, transaction_id)
