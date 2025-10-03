@@ -67,7 +67,12 @@ file_upload_parser.add_argument('data',
 @transactions_ns.route("/")
 class TransactionList(Resource):
     @transactions_ns.doc('list_transactions', security='Bearer Auth')
-    @transactions_ns.marshal_with(pagination_model)
+    @transactions_ns.response(200, 'Successfully retrieved transactions', pagination_model)
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @transactions_ns.param('page', 'Page number', type=int, default=1)
     @transactions_ns.param('per_page', 'Items per page', type=int, default=10)
     @transactions_ns.param('branch_id', 'Filter by branch ID', type=int)
@@ -89,57 +94,80 @@ class TransactionList(Resource):
         date_from = request.args.get("date_from")
         date_to = request.args.get("date_to")
         search = request.args.get("search", "")
+        
+        # Validate pagination parameters
+        if page < 1:
+            return {"error": "Page number must be positive"}, 400
+        if per_page < 1 or per_page > 100:
+            return {"error": "Items per page must be between 1 and 100"}, 400
 
-        # Build query with joins
-        # query = Transaction.query.join(Warehouse)
-        query = (
-    Transaction.query
-    .options(noload(Transaction.asset_transactions), noload(Transaction.user))  # exclude relationships
-    .join(Warehouse)
-)
-        # Apply filters
-        if branch_id:
-            query = query.filter(Warehouse.branch_id == branch_id)
-        
-        if warehouse_id:
-            query = query.filter(Transaction.warehouse_id == warehouse_id)
-        
-        if date_from:
-            try:
-                date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
-                query = query.filter(Transaction.date >= date_from_obj)
-            except ValueError:
-                return {"error": "Invalid date_from format. Use YYYY-MM-DD"}, 400
-        
-        if date_to:
-            try:
-                date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
-                query = query.filter(Transaction.date <= date_to_obj)
-            except ValueError:
-                return {"error": "Invalid date_to format. Use YYYY-MM-DD"}, 400
-        
-        if search:
-            query = query.filter(or_(
-                Transaction.description.contains(search),
-                Transaction.reference_number.contains(search)
-            ))
+        try:
+            # Build query with joins
+            # query = Transaction.query.join(Warehouse)
+            query = (
+        Transaction.query
+        .options(noload(Transaction.asset_transactions), noload(Transaction.user))  # exclude relationships
+        .join(Warehouse)
+    )
+            # Apply filters
+            if branch_id:
+                query = query.filter(Warehouse.branch_id == branch_id)
+            
+            if warehouse_id:
+                query = query.filter(Transaction.warehouse_id == warehouse_id)
+            
+            if date_from:
+                try:
+                    date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
+                    query = query.filter(Transaction.date >= date_from_obj)
+                except ValueError:
+                    return {"error": "Invalid date_from format. Use YYYY-MM-DD"}, 400
+            
+            if date_to:
+                try:
+                    date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
+                    query = query.filter(Transaction.date <= date_to_obj)
+                except ValueError:
+                    return {"error": "Invalid date_to format. Use YYYY-MM-DD"}, 400
+            
+            if search:
+                query = query.filter(or_(
+                    Transaction.description.contains(search),
+                    Transaction.reference_number.contains(search)
+                ))
 
-        # Order by date descending (newest first)
-        query = query.order_by(Transaction.date.desc(), Transaction.created_at.desc())
+            # Order by date descending (newest first)
+            query = query.order_by(Transaction.date.desc(), Transaction.created_at.desc())
 
-        paginated = query.paginate(page=page, per_page=per_page)
-        return {
-            "items": transactions_schema.dump(paginated.items),
-            "total": paginated.total,
-            "page": paginated.page,
-            "pages": paginated.pages
-        }
+            paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+            return {
+                "items": transactions_schema.dump(paginated.items),
+                "total": paginated.total,
+                "page": paginated.page,
+                "pages": paginated.pages
+            }
+        except OperationalError as e:
+            logging.error(f"Database operational error in transaction list: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error in transaction list: {str(e)}")
+            return {"error": "Database error occurred"}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error in transaction list: {str(e)}")
+            return {"error": "Internal server error"}, 500
     
 
     @transactions_ns.doc('create_transaction', security='Bearer Auth')
     #@transactions_ns.expect(transaction_create_model)
     @transactions_ns.expect(file_upload_parser)
-    @transactions_ns.marshal_with(transaction_model, code=201)
+    @transactions_ns.response(201, 'Successfully created transaction', transaction_model)
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Warehouse/Asset not found', error_model)
+    @transactions_ns.response(409, 'Conflict - Insufficient quantity', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def post(self):
         """Create a new transaction with asset transactions"""
@@ -248,7 +276,7 @@ class TransactionList(Resource):
                         return {
                             "error": f"Insufficient quantity for asset {asset.name_en}. "
                                 f"Available: {asset.quantity}, Requested: {asset_trans_data['quantity']}"
-                        }, 400
+                        }, 409
                 
                 # Update asset quantity
                 if transaction_type:  # IN transaction
@@ -271,16 +299,33 @@ class TransactionList(Resource):
             
             return transaction_schema.dump(new_transaction), 201
             
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error creating transaction: {str(e)}")
+            return {"error": "Data integrity constraint violation"}, 409
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error creating transaction: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error creating transaction: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
             db.session.rollback()
-            print(f"Unexpected error: {str(e)}")
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error creating transaction: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
 @transactions_ns.route("/<int:transaction_id>")
 class TransactionResource(Resource):
     @transactions_ns.doc('get_transaction', security='Bearer Auth')
-    @transactions_ns.marshal_with(transaction_model)
+    @transactions_ns.response(200, 'Successfully retrieved transaction', transaction_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Transaction not found', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def get(self, transaction_id):
         """Get a specific transaction"""
@@ -288,17 +333,33 @@ class TransactionResource(Resource):
         if error:
             return error
 
-        transaction = db.session.get(Transaction, transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-        return transaction_schema.dump(transaction)
+        try:
+            transaction = db.session.get(Transaction, transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}, 404
+            return transaction_schema.dump(transaction)
+        except OperationalError as e:
+            logging.error(f"Database operational error getting transaction {transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error getting transaction {transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error getting transaction {transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
 
 
     @transactions_ns.doc('update_transaction', security='Bearer Auth')
     @transactions_ns.expect(transaction_input_model)
-    @transactions_ns.marshal_with(transaction_model)
+    @transactions_ns.response(200, 'Successfully updated transaction', transaction_model)
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Transaction not found', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def put(self, transaction_id):
         """Update a transaction"""
@@ -306,12 +367,20 @@ class TransactionResource(Resource):
         if error:
             return error
 
-        transaction = db.session.get(Transaction, transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
+        # Validate request body
+        json_data = request.get_json()
+        if not json_data:
+            return {"error": "Request body is required"}, 400
 
         try:
-            data = transaction_schema.load(request.get_json(), partial=True)
+            transaction = db.session.get(Transaction, transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}, 404
+
+            try:
+                data = transaction_schema.load(json_data, partial=True)
+            except ValidationError as err:
+                return {"error": "Validation error", "details": err.messages}, 400
             
             # Don't allow updating custom_id
             if 'custom_id' in data:
@@ -322,14 +391,30 @@ class TransactionResource(Resource):
             
             db.session.commit()
             return transaction_schema.dump(transaction)
-        except ValidationError as err:
-            return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error updating transaction {transaction_id}: {str(e)}")
+            return {"error": "Data integrity constraint violation"}, 409
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error updating transaction {transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error updating transaction {transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
             db.session.rollback()
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error updating transaction {transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
     @transactions_ns.doc('delete_transaction', security='Bearer Auth')
-    @transactions_ns.marshal_with(success_model)
+    @transactions_ns.response(200, 'Successfully deleted transaction', success_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Transaction not found', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def delete(self, transaction_id):
         """Delete a transaction"""
@@ -337,11 +422,11 @@ class TransactionResource(Resource):
         if error:
             return error
 
-        transaction = db.session.get(Transaction, transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-
         try:
+            transaction = db.session.get(Transaction, transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}, 404
+
             # Before deleting transaction, reverse all asset quantity changes
             transaction_type = transaction.transaction_type  # Get transaction type once
             for asset_trans in transaction.asset_transactions:
@@ -355,15 +440,34 @@ class TransactionResource(Resource):
             db.session.delete(transaction)  # Cascade will delete asset_transactions
             db.session.commit()
             return {"message": f"Transaction {transaction_id} deleted successfully"}
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error deleting transaction {transaction_id}: {str(e)}")
+            return {"error": "Cannot delete transaction: it may be referenced by other records"}, 409
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error deleting transaction {transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error deleting transaction {transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
             db.session.rollback()
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error deleting transaction {transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
 @transactions_ns.route("/<int:transaction_id>/assets")
 class TransactionAssetsList(Resource):
     @transactions_ns.doc('get_transaction_assets', security='Bearer Auth')
-    @transactions_ns.marshal_with(pagination_model)
+    @transactions_ns.response(200, 'Successfully retrieved transaction assets', pagination_model)
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Transaction not found', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @transactions_ns.param('page', 'Page number', type=int, default=1)
     @transactions_ns.param('per_page', 'Items per page', type=int, default=10)
     @jwt_required()
@@ -373,27 +477,50 @@ class TransactionAssetsList(Resource):
         if error:
             return error
 
-        # Check if transaction exists
-        transaction = db.session.get(Transaction, transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
-
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
+        
+        # Validate pagination parameters
+        if page < 1:
+            return {"error": "Page number must be positive"}, 400
+        if per_page < 1 or per_page > 100:
+            return {"error": "Items per page must be between 1 and 100"}, 400
 
-        query = AssetTransaction.query.filter_by(transaction_id=transaction_id)
+        try:
+            # Check if transaction exists
+            transaction = db.session.get(Transaction, transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}, 404
 
-        paginated = query.paginate(page=page, per_page=per_page)
-        return {
-            "items": asset_transactions_schema.dump(paginated.items),
-            "total": paginated.total,
-            "page": paginated.page,
-            "pages": paginated.pages
-        }
+            query = AssetTransaction.query.filter_by(transaction_id=transaction_id)
+
+            paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+            return {
+                "items": asset_transactions_schema.dump(paginated.items),
+                "total": paginated.total,
+                "page": paginated.page,
+                "pages": paginated.pages
+            }
+        except OperationalError as e:
+            logging.error(f"Database operational error getting transaction assets {transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error getting transaction assets {transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error getting transaction assets {transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
     @transactions_ns.doc('add_asset_to_transaction', security='Bearer Auth')
     @transactions_ns.expect(asset_transaction_input_model)
-    @transactions_ns.marshal_with(asset_transaction_model, code=201)
+    @transactions_ns.response(201, 'Successfully added asset to transaction', asset_transaction_model)
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Transaction/Asset not found', error_model)
+    @transactions_ns.response(409, 'Conflict - Insufficient quantity', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def post(self, transaction_id):
         """Add an asset transaction to an existing transaction"""
@@ -401,13 +528,21 @@ class TransactionAssetsList(Resource):
         if error:
             return error
 
-        # Check if transaction exists
-        transaction = db.session.get(Transaction, transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
+        # Validate request body
+        json_data = request.get_json()
+        if not json_data:
+            return {"error": "Request body is required"}, 400
 
         try:
-            data = asset_transaction_create_schema.load(request.get_json())
+            # Check if transaction exists
+            transaction = db.session.get(Transaction, transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}, 404
+
+            try:
+                data = asset_transaction_create_schema.load(json_data)
+            except ValidationError as err:
+                return {"error": "Validation error", "details": err.messages}, 400
             
             # Get the asset and check availability for OUT transactions
             asset = db.session.get(FixedAsset, data['asset_id'])
@@ -423,7 +558,7 @@ class TransactionAssetsList(Resource):
                     return {
                         "error": f"Insufficient quantity for asset {asset.name_en}. "
                                f"Available: {asset.quantity}, Requested: {data['quantity']}"
-                    }, 400
+                    }, 409
             
             # Update asset quantity
             if transaction_type:  # IN transaction
@@ -443,17 +578,33 @@ class TransactionAssetsList(Resource):
             
             return asset_transaction_schema.dump(asset_transaction), 201
             
-        except ValidationError as err:
-            return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error adding asset to transaction {transaction_id}: {str(e)}")
+            return {"error": "Data integrity constraint violation"}, 409
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error adding asset to transaction {transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error adding asset to transaction {transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
             db.session.rollback()
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error adding asset to transaction {transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
 @asset_transactions_ns.route("/<int:asset_transaction_id>")
 class AssetTransactionResource(Resource):
     @asset_transactions_ns.doc('get_asset_transaction', security='Bearer Auth')
-    @asset_transactions_ns.marshal_with(asset_transaction_model)
+    @asset_transactions_ns.response(200, 'Successfully retrieved asset transaction', asset_transaction_model)
+    @asset_transactions_ns.response(401, 'Unauthorized', error_model)
+    @asset_transactions_ns.response(403, 'Forbidden', error_model)
+    @asset_transactions_ns.response(404, 'Asset transaction not found', error_model)
+    @asset_transactions_ns.response(500, 'Internal Server Error', error_model)
+    @asset_transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def get(self, asset_transaction_id):
         """Get a specific asset transaction"""
@@ -461,15 +612,32 @@ class AssetTransactionResource(Resource):
         if error:
             return error
 
-        asset_transaction = db.session.get(AssetTransaction, asset_transaction_id)
-        if not asset_transaction:
-            return {"error": "Asset transaction not found"}, 404
-        
-        return asset_transaction_schema.dump(asset_transaction)
+        try:
+            asset_transaction = db.session.get(AssetTransaction, asset_transaction_id)
+            if not asset_transaction:
+                return {"error": "Asset transaction not found"}, 404
+            
+            return asset_transaction_schema.dump(asset_transaction)
+        except OperationalError as e:
+            logging.error(f"Database operational error getting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error getting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error getting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
     @asset_transactions_ns.doc('update_asset_transaction', security='Bearer Auth')
     @asset_transactions_ns.expect(asset_transaction_input_model)
-    @asset_transactions_ns.marshal_with(asset_transaction_model)
+    @asset_transactions_ns.response(200, 'Successfully updated asset transaction', asset_transaction_model)
+    @asset_transactions_ns.response(400, 'Bad Request', error_model)
+    @asset_transactions_ns.response(401, 'Unauthorized', error_model)
+    @asset_transactions_ns.response(403, 'Forbidden', error_model)
+    @asset_transactions_ns.response(404, 'Asset transaction/Asset not found', error_model)
+    @asset_transactions_ns.response(409, 'Conflict - Insufficient quantity', error_model)
+    @asset_transactions_ns.response(500, 'Internal Server Error', error_model)
+    @asset_transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def put(self, asset_transaction_id):
         """Update an asset transaction"""
@@ -477,12 +645,20 @@ class AssetTransactionResource(Resource):
         if error:
             return error
 
-        asset_transaction = db.session.get(AssetTransaction, asset_transaction_id)
-        if not asset_transaction:
-            return {"error": "Asset transaction not found"}, 404
+        # Validate request body
+        json_data = request.get_json()
+        if not json_data:
+            return {"error": "Request body is required"}, 400
 
         try:
-            data = asset_transaction_create_schema.load(request.get_json(), partial=True)
+            asset_transaction = db.session.get(AssetTransaction, asset_transaction_id)
+            if not asset_transaction:
+                return {"error": "Asset transaction not found"}, 404
+
+            try:
+                data = asset_transaction_create_schema.load(json_data, partial=True)
+            except ValidationError as err:
+                return {"error": "Validation error", "details": err.messages}, 400
             
             # Get current values before update
             old_quantity = asset_transaction.quantity
@@ -517,7 +693,7 @@ class AssetTransactionResource(Resource):
                         return {
                             "error": f"Insufficient quantity for asset {new_asset.name_en}. "
                                    f"Available: {new_asset.quantity}, Requested: {new_quantity}"
-                        }, 400
+                        }, 409
                 
                 # Apply effect to new asset
                 if transaction_type:  # IN transaction
@@ -546,7 +722,7 @@ class AssetTransactionResource(Resource):
                             return {
                                 "error": f"Insufficient quantity for asset {asset.name_en}. "
                                        f"Available: {asset.quantity}, Requested: {new_quantity}"
-                            }, 400
+                            }, 409
                     
                     # Apply the new effect
                     if transaction_type:  # IN transaction
@@ -564,14 +740,30 @@ class AssetTransactionResource(Resource):
             db.session.commit()
             return asset_transaction_schema.dump(asset_transaction)
             
-        except ValidationError as err:
-            return {"errors": err.messages}, 400
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error updating asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Data integrity constraint violation"}, 409
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error updating asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error updating asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
             db.session.rollback()
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error updating asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
     @asset_transactions_ns.doc('delete_asset_transaction', security='Bearer Auth')
-    @asset_transactions_ns.marshal_with(success_model)
+    @asset_transactions_ns.response(200, 'Successfully deleted asset transaction', success_model)
+    @asset_transactions_ns.response(401, 'Unauthorized', error_model)
+    @asset_transactions_ns.response(403, 'Forbidden', error_model)
+    @asset_transactions_ns.response(404, 'Asset transaction not found', error_model)
+    @asset_transactions_ns.response(500, 'Internal Server Error', error_model)
+    @asset_transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def delete(self, asset_transaction_id):
         """Delete an asset transaction"""
@@ -579,11 +771,11 @@ class AssetTransactionResource(Resource):
         if error:
             return error
 
-        asset_transaction = db.session.get(AssetTransaction, asset_transaction_id)
-        if not asset_transaction:
-            return {"error": "Asset transaction not found"}, 404
-
         try:
+            asset_transaction = db.session.get(AssetTransaction, asset_transaction_id)
+            if not asset_transaction:
+                return {"error": "Asset transaction not found"}, 404
+
             # Before deleting, reverse the quantity effect on the asset
             # Get the parent transaction's transaction_type
             parent_transaction = asset_transaction.transaction
@@ -599,14 +791,33 @@ class AssetTransactionResource(Resource):
             db.session.delete(asset_transaction)
             db.session.commit()
             return {"message": f"Asset transaction {asset_transaction_id} deleted successfully"}
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error deleting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Cannot delete asset transaction: it may be referenced by other records"}, 409
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error deleting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error deleting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
             db.session.rollback()
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error deleting asset transaction {asset_transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
 @transactions_ns.route("/summary")
 class TransactionSummary(Resource):
     @transactions_ns.doc('get_transaction_summary', security='Bearer Auth')
+    @transactions_ns.response(200, 'Successfully retrieved transaction summary')
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @transactions_ns.param('branch_id', 'Filter by branch ID', type=int)
     @transactions_ns.param('warehouse_id', 'Filter by warehouse ID', type=int)
     @transactions_ns.param('date_from', 'Summary from date (YYYY-MM-DD)', type=str)
@@ -623,66 +834,82 @@ class TransactionSummary(Resource):
         date_from = request.args.get("date_from")
         date_to = request.args.get("date_to")
 
-        # Build base query
-        transaction_query = Transaction.query.join(Warehouse)
-        asset_transaction_query = AssetTransaction.query.join(Transaction).join(Warehouse)
+        try:
+            # Build base query
+            transaction_query = Transaction.query.join(Warehouse)
+            asset_transaction_query = AssetTransaction.query.join(Transaction).join(Warehouse)
 
-        # Apply filters
-        if branch_id:
-            transaction_query = transaction_query.filter(Warehouse.branch_id == branch_id)
-            asset_transaction_query = asset_transaction_query.filter(Warehouse.branch_id == branch_id)
-        
-        if warehouse_id:
-            transaction_query = transaction_query.filter(Transaction.warehouse_id == warehouse_id)
-            asset_transaction_query = asset_transaction_query.filter(Transaction.warehouse_id == warehouse_id)
-        
-        if date_from:
-            try:
-                date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
-                transaction_query = transaction_query.filter(Transaction.date >= date_from_obj)
-                asset_transaction_query = asset_transaction_query.filter(Transaction.date >= date_from_obj)
-            except ValueError:
-                return {"error": "Invalid date_from format. Use YYYY-MM-DD"}, 400
-        
-        if date_to:
-            try:
-                date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
-                transaction_query = transaction_query.filter(Transaction.date <= date_to_obj)
-                asset_transaction_query = asset_transaction_query.filter(Transaction.date <= date_to_obj)
-            except ValueError:
-                return {"error": "Invalid date_to format. Use YYYY-MM-DD"}, 400
+            # Apply filters
+            if branch_id:
+                transaction_query = transaction_query.filter(Warehouse.branch_id == branch_id)
+                asset_transaction_query = asset_transaction_query.filter(Warehouse.branch_id == branch_id)
+            
+            if warehouse_id:
+                transaction_query = transaction_query.filter(Transaction.warehouse_id == warehouse_id)
+                asset_transaction_query = asset_transaction_query.filter(Transaction.warehouse_id == warehouse_id)
+            
+            if date_from:
+                try:
+                    date_from_obj = datetime.strptime(date_from, "%Y-%m-%d").date()
+                    transaction_query = transaction_query.filter(Transaction.date >= date_from_obj)
+                    asset_transaction_query = asset_transaction_query.filter(Transaction.date >= date_from_obj)
+                except ValueError:
+                    return {"error": "Invalid date_from format. Use YYYY-MM-DD"}, 400
+            
+            if date_to:
+                try:
+                    date_to_obj = datetime.strptime(date_to, "%Y-%m-%d").date()
+                    transaction_query = transaction_query.filter(Transaction.date <= date_to_obj)
+                    asset_transaction_query = asset_transaction_query.filter(Transaction.date <= date_to_obj)
+                except ValueError:
+                    return {"error": "Invalid date_to format. Use YYYY-MM-DD"}, 400
 
-        # Calculate statistics
-        total_transactions = transaction_query.count()
-        total_in_transactions = transaction_query.filter(Transaction.transaction_type == True).count()
-        total_out_transactions = transaction_query.filter(Transaction.transaction_type == False).count()
-        
-        # Calculate total values
-        from sqlalchemy import func
-        total_in_value = asset_transaction_query.filter(
-            Transaction.transaction_type == True,
-            AssetTransaction.total_value.isnot(None)
-        ).with_entities(func.sum(AssetTransaction.total_value)).scalar() or 0
-        
-        total_out_value = asset_transaction_query.filter(
-            Transaction.transaction_type == False,
-            AssetTransaction.total_value.isnot(None)
-        ).with_entities(func.sum(AssetTransaction.total_value)).scalar() or 0
+            # Calculate statistics
+            total_transactions = transaction_query.count()
+            total_in_transactions = transaction_query.filter(Transaction.transaction_type == True).count()
+            total_out_transactions = transaction_query.filter(Transaction.transaction_type == False).count()
+            
+            # Calculate total values
+            from sqlalchemy import func
+            total_in_value = asset_transaction_query.filter(
+                Transaction.transaction_type == True,
+                AssetTransaction.total_value.isnot(None)
+            ).with_entities(func.sum(AssetTransaction.total_value)).scalar() or 0
+            
+            total_out_value = asset_transaction_query.filter(
+                Transaction.transaction_type == False,
+                AssetTransaction.total_value.isnot(None)
+            ).with_entities(func.sum(AssetTransaction.total_value)).scalar() or 0
 
-        return {
-            "total_transactions": total_transactions,
-            "total_in_transactions": total_in_transactions,
-            "total_out_transactions": total_out_transactions,
-            "total_in_value": float(total_in_value),
-            "total_out_value": float(total_out_value),
-            "net_value": float(total_in_value - total_out_value)
-        }
+            return {
+                "total_transactions": total_transactions,
+                "total_in_transactions": total_in_transactions,
+                "total_out_transactions": total_out_transactions,
+                "total_in_value": float(total_in_value),
+                "total_out_value": float(total_out_value),
+                "net_value": float(total_in_value - total_out_value)
+            }
+        except OperationalError as e:
+            logging.error(f"Database operational error in transaction summary: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error in transaction summary: {str(e)}")
+            return {"error": "Database error occurred"}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error in transaction summary: {str(e)}")
+            return {"error": "Internal server error"}, 500
     
 
 # New Resource for downloading transaction file
 @transactions_ns.route('/<int:transaction_id>/download')
 class TransactionDownloadResource(Resource):
     @transactions_ns.doc('download_transaction_file', security='Bearer Auth')
+    @transactions_ns.response(200, 'Successfully downloaded file')
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(404, 'Transaction/File not found', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def get(self, transaction_id):
         """Download the attached file for a transaction"""
@@ -690,22 +917,32 @@ class TransactionDownloadResource(Resource):
         if error:
             return error
 
-        transaction = db.session.get(Transaction, transaction_id)
-        if not transaction:
-            return {"error": "Transaction not found"}, 404
+        try:
+            transaction = db.session.get(Transaction, transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}, 404
 
-        if not transaction.attached_file:
-            return {"error": "No file attached to this transaction."}, 404
+            if not transaction.attached_file:
+                return {"error": "No file attached to this transaction."}, 404
 
-        file_path = transaction.attached_file
-        # If file path is not absolute, assume uploads folder
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(current_app.root_path, '..', 'uploads', file_path)
+            file_path = transaction.attached_file
+            # If file path is not absolute, assume uploads folder
+            if not os.path.isabs(file_path):
+                file_path = os.path.join(current_app.root_path, '..', 'uploads', file_path)
 
-        if not os.path.exists(file_path):
-            return {"error": "File not found."}, 404
+            if not os.path.exists(file_path):
+                return {"error": "File not found."}, 404
 
-        return send_file(file_path, as_attachment=True)
+            return send_file(file_path, as_attachment=True)
+        except OperationalError as e:
+            logging.error(f"Database operational error downloading file for transaction {transaction_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error downloading file for transaction {transaction_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
+        except Exception as e:
+            logging.error(f"Unexpected error downloading file for transaction {transaction_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
 @transactions_ns.route("/generate-report")
@@ -970,6 +1207,11 @@ class GenerateReport(Resource):
 
 @transactions_ns.route("/asset-average/<int:asset_id>")
 class AssetAverage(Resource):
+    @transactions_ns.response(200, 'Successfully retrieved asset average')
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @transactions_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def get(self, asset_id):
         """Get average cost for asset from IN transactions"""
@@ -997,8 +1239,14 @@ class AssetAverage(Resource):
                 return {"asset_id": asset_id, "average": round(float(result), 2)}
             else:
                 return {"asset_id": asset_id, "average": 0.0}
-                
+        except OperationalError as e:
+            logging.error(f"Database operational error getting asset average for {asset_id}: {str(e)}")
+            return {"error": "Database connection error"}, 503
+        except SQLAlchemyError as e:
+            logging.error(f"Database error getting asset average for {asset_id}: {str(e)}")
+            return {"error": "Database error occurred"}, 500
         except Exception as e:
-            return {"error": str(e)}, 500
+            logging.error(f"Unexpected error getting asset average for {asset_id}: {str(e)}")
+            return {"error": "Internal server error"}, 500
 
 
