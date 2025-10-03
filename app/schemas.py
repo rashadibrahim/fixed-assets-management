@@ -169,6 +169,8 @@ class JobDescriptionSchema(Schema):
     can_edit_asset = fields.Bool(required=True)
     can_delete_asset = fields.Bool(required=True)
     can_print_barcode = fields.Bool(required=True)
+    can_make_report = fields.Bool(required=True)
+    can_make_transaction = fields.Bool(required=True)
 
 
 class UserSchema(Schema):
@@ -188,3 +190,5 @@ class UserSchema(Schema):
     can_edit_asset = fields.Bool(required=True)
     can_delete_asset = fields.Bool(required=True)
     can_print_barcode = fields.Bool(required=True)
+    can_make_report = fields.Bool(required=True)
+    can_make_transaction = fields.Bool(required=True)

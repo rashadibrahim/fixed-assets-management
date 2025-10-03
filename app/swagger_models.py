@@ -122,7 +122,9 @@ user_model = api.model('User', {
     'can_read_asset': fields.Boolean(description='Permission to read assets'),
     'can_edit_asset': fields.Boolean(description='Permission to edit assets'),
     'can_delete_asset': fields.Boolean(description='Permission to delete assets'),
-    'can_print_barcode': fields.Boolean(description='Permission to print barcodes')
+    'can_print_barcode': fields.Boolean(description='Permission to print barcodes'),
+    'can_make_report': fields.Boolean(description='Permission to make reports'),
+    'can_make_transaction': fields.Boolean(description='Permission to make transactions')
 })
 
 user_input_model = api.model('UserInput', {
@@ -146,7 +148,9 @@ user_update_model = api.model('UserUpdate', {
         'can_read_asset': fields.Boolean(description='Permission to read assets'),
         'can_edit_asset': fields.Boolean(description='Permission to edit assets'),
         'can_delete_asset': fields.Boolean(description='Permission to delete assets'),
-        'can_print_barcode': fields.Boolean(description='Permission to print barcodes')
+        'can_print_barcode': fields.Boolean(description='Permission to print barcodes'),
+        'can_make_report': fields.Boolean(description='Permission to make reports'),
+        'can_make_transaction': fields.Boolean(description='Permission to make transactions')
     }), description='User permissions')
 })
 
@@ -163,7 +167,9 @@ job_role_model = api.model('JobRole', {
     'can_read_asset': fields.Boolean(required=True, description='Permission to read assets'),
     'can_edit_asset': fields.Boolean(required=True, description='Permission to edit assets'),
     'can_delete_asset': fields.Boolean(required=True, description='Permission to delete assets'),
-    'can_print_barcode': fields.Boolean(required=True, description='Permission to print barcodes')
+    'can_print_barcode': fields.Boolean(required=True, description='Permission to print barcodes'),
+    'can_make_report': fields.Boolean(required=True, description='Permission to make reports'),
+    'can_make_transaction': fields.Boolean(required=True, description='Permission to make transactions')
 })
 
 job_role_input_model = api.model('JobRoleInput', {
@@ -177,7 +183,9 @@ job_role_input_model = api.model('JobRoleInput', {
     'can_read_asset': fields.Boolean(description='Permission to read assets', default=False),
     'can_edit_asset': fields.Boolean(description='Permission to edit assets', default=False),
     'can_delete_asset': fields.Boolean(description='Permission to delete assets', default=False),
-    'can_print_barcode': fields.Boolean(description='Permission to print barcodes', default=False)
+    'can_print_barcode': fields.Boolean(description='Permission to print barcodes', default=False),
+    'can_make_report': fields.Boolean(description='Permission to make reports', default=False),
+    'can_make_transaction': fields.Boolean(description='Permission to make transactions', default=False)
 })
 
 # Authentication models
