@@ -40,7 +40,7 @@ if __name__ == "__main__":
         # Start the Flask application
         print("🚀 Starting Flask application...")
         # app.run(host="0.0.0.0", port=8000, debug=True, threaded=True) # For development
-        app.run(host="0.0.0.0",threaded=True) # For production
+        app.run(host="0.0.0.0", debug=True, threaded=True) # For production
     except Exception as e:
         logging.error(f"Failed to start application: {e}")
         exit(1)

@@ -149,6 +149,8 @@ class JobDescription(db.Model):
     can_edit_asset = db.Column(db.Boolean, default=False)
     can_delete_asset = db.Column(db.Boolean, default=False)
     can_print_barcode = db.Column(db.Boolean, default=False)
+    can_make_report = db.Column(db.Boolean, default=False)
+    can_make_transaction = db.Column(db.Boolean, default=False)
 
     def __repr__(self):
         return f"<JobDescription {self.name}>"
@@ -173,6 +175,8 @@ class User(db.Model):
     can_edit_asset = db.Column(db.Boolean, default=False)
     can_delete_asset = db.Column(db.Boolean, default=False)
     can_print_barcode = db.Column(db.Boolean, default=False)
+    can_make_report = db.Column(db.Boolean, default=False)
+    can_make_transaction = db.Column(db.Boolean, default=False)
 
     # Relationships
     transactions = db.relationship("Transaction", back_populates="user")  # NEW: One-to-many relationship with transactions

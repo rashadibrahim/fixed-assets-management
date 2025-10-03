@@ -58,6 +58,8 @@ class Signup(Resource):
             can_edit_asset=job.can_edit_asset,
             can_delete_asset=job.can_delete_asset,
             can_print_barcode=job.can_print_barcode,
+            can_make_report=job.can_make_report,
+            can_make_transaction=job.can_make_transaction,
         )
         user.set_password(password)
 
@@ -179,6 +181,8 @@ class UserResource(Resource):
             user.can_delete_asset = perms.get("can_delete_asset", user.can_delete_asset)
 
             user.can_print_barcode = perms.get("can_print_barcode", user.can_print_barcode)
+            user.can_make_report = perms.get("can_make_report", user.can_make_report)
+            user.can_make_transaction = perms.get("can_make_transaction", user.can_make_transaction)
 
         db.session.commit()
 

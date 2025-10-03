@@ -69,6 +69,8 @@ class JobRoleList(Resource):
             can_edit_asset=data.get("can_edit_asset", False),
             can_delete_asset=data.get("can_delete_asset", False),
             can_print_barcode=data.get("can_print_barcode", False),
+            can_make_report=data.get("can_make_report", False),
+            can_make_transaction=data.get("can_make_transaction", False),
         )
 
         db.session.add(job_desc)
@@ -104,7 +106,7 @@ class JobRoleResource(Resource):
             "can_read_branch", "can_edit_branch", "can_delete_branch",
             "can_read_warehouse", "can_edit_warehouse", "can_delete_warehouse",
             "can_read_asset", "can_edit_asset", "can_delete_asset",
-            "can_print_barcode"
+            "can_print_barcode", "can_make_report", "can_make_transaction"
         ]:
             if field in data:
                 setattr(job_desc, field, data[field])

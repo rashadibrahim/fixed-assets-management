@@ -129,21 +129,36 @@ class AssetList(Resource):
     @assets_ns.marshal_with(pagination_model)
     @assets_ns.param('page', 'Page number', type=int, default=1)
     @assets_ns.param('per_page', 'Items per page', type=int, default=10)
-    @assets_ns.param('category_id', 'Filter assets by category ID', type=int)
+    @assets_ns.param('category_ids', 'Filter assets by category IDs (comma-separated, e.g., "1,2,3" or single "1")', type=str)
     @jwt_required()
     def get(self):
-        """Get all fixed assets with pagination and optional category filtering"""
+        """Get all fixed assets with pagination and optional category filtering
+        
+        Supports filtering by multiple categories using comma-separated category IDs.
+        Examples:
+        - Single category: ?category_ids=1
+        - Multiple categories: ?category_ids=1,2,3
+        """
         error = check_permission("can_read_asset")
         if error:
             return error
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
-        category_id = request.args.get("category_id", type=int)
+        category_ids_param = request.args.get("category_ids", type=str)
 
         query = FixedAsset.query
-        if category_id:
-            query = query.filter_by(category_id=category_id)
+        
+        # Handle multiple category filtering
+        if category_ids_param:
+            try:
+                # Parse comma-separated category IDs
+                category_ids = [int(id.strip()) for id in category_ids_param.split(',') if id.strip()]
+                if category_ids:
+                    # Filter assets that belong to any of the specified categories
+                    query = query.filter(FixedAsset.category_id.in_(category_ids))
+            except ValueError:
+                return {"error": "Invalid category_ids format. Use comma-separated integers (e.g., '1,2,3')"}, 400
 
         paginated = query.paginate(page=page, per_page=per_page)
         return {
