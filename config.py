@@ -16,7 +16,7 @@ class Config:
     DB_PASSWORD = 'belal'  # Your actual password here
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-key")
     # Build the database URI directly
-    SQLALCHEMY_DATABASE_URI = "sqlite:///fixed_assets.db" #f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"   
+    SQLALCHEMY_DATABASE_URI = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}" #"sqlite:///fixed_assets.db"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # File upload configuration
