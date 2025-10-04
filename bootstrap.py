@@ -18,7 +18,9 @@ with app.app_context():
             can_read_asset=True,
             can_edit_asset=True,
             can_delete_asset=True,
-            can_print_barcode=True
+            can_print_barcode=True,
+            can_make_report=True,
+            can_make_transaction=True
         )
         
         # Check if admin role already exists
@@ -47,7 +49,9 @@ with app.app_context():
                 can_read_asset=True,
                 can_edit_asset=True,
                 can_delete_asset=True,
-                can_print_barcode=True
+                can_print_barcode=True,
+                can_make_report=True,
+                can_make_transaction=True
             )
             admin_user.set_password("admin")  
             

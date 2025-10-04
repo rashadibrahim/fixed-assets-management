@@ -179,16 +179,34 @@ class UserSchema(Schema):
     email = fields.Email(required=True)
     role = fields.Str(required=True)
 
-    # permissions
-    can_read_branch = fields.Bool(required=True)
-    can_edit_branch = fields.Bool(required=True)
-    can_delete_branch = fields.Bool(required=True)
-    can_read_warehouse = fields.Bool(required=True)
-    can_edit_warehouse = fields.Bool(required=True)
-    can_delete_warehouse = fields.Bool(required=True)
-    can_read_asset = fields.Bool(required=True)
-    can_edit_asset = fields.Bool(required=True)
-    can_delete_asset = fields.Bool(required=True)
-    can_print_barcode = fields.Bool(required=True)
-    can_make_report = fields.Bool(required=True)
-    can_make_transaction = fields.Bool(required=True)
+    # permissions - dump_only for response, not required for input
+    can_read_branch = fields.Bool(dump_only=True)
+    can_edit_branch = fields.Bool(dump_only=True)
+    can_delete_branch = fields.Bool(dump_only=True)
+    can_read_warehouse = fields.Bool(dump_only=True)
+    can_edit_warehouse = fields.Bool(dump_only=True)
+    can_delete_warehouse = fields.Bool(dump_only=True)
+    can_read_asset = fields.Bool(dump_only=True)
+    can_edit_asset = fields.Bool(dump_only=True)
+    can_delete_asset = fields.Bool(dump_only=True)
+    can_print_barcode = fields.Bool(dump_only=True)
+    can_make_report = fields.Bool(dump_only=True)
+    can_make_transaction = fields.Bool(dump_only=True)
+
+
+class UserCreateSchema(Schema):
+    """Schema for creating users - only requires basic info"""
+    full_name = fields.Str(required=True)
+    email = fields.Email(required=True)
+    password = fields.Str(required=True)
+    role = fields.Str(required=True)
+
+
+class UserUpdateSchema(Schema):
+    """Schema for updating users - all fields optional"""
+    full_name = fields.Str(required=False)
+    email = fields.Email(required=False)
+    role = fields.Str(required=False)
+    
+    # Optional permission updates
+    permissions = fields.Dict(required=False)

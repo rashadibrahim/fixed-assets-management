@@ -5,7 +5,7 @@ import logging
 from marshmallow import ValidationError
 from .. import db
 from ..models import User, JobDescription, Branch, Warehouse, FixedAsset
-from ..schemas import UserSchema
+from ..schemas import UserSchema, UserCreateSchema, UserUpdateSchema
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 import datetime
 from ..utils import admin_required, check_permission, error_response
@@ -17,6 +17,8 @@ from ..swagger_models import (
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 user_schema = UserSchema()
+user_create_schema = UserCreateSchema()
+user_update_schema = UserUpdateSchema()
 
 
 @auth_ns.route("/signup")
@@ -27,8 +29,8 @@ class Signup(Resource):
     @auth_ns.response(400, 'Bad Request', error_model)
     @auth_ns.response(409, 'Conflict - Email already exists', error_model)
     @auth_ns.response(500, 'Internal Server Error', error_model)
-    @jwt_required()
-    @admin_required
+    # @jwt_required()
+    # @admin_required
     def post(self):
         """Register a new user"""
         # Validate request body
@@ -37,7 +39,7 @@ class Signup(Resource):
             return {"error": "Request body is required"}, 400
 
         try:
-            data = user_schema.load(json_data)
+            data = user_create_schema.load(json_data)
         except ValidationError as err:
             return {"error": "Validation error", "details": err.messages}, 400
 
