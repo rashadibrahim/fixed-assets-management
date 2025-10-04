@@ -47,6 +47,7 @@ class Signup(Resource):
         email = data.get("email")
         password = data.get("password")
         role = data.get("role")
+        custom_permissions = data.get("permissions", {})
 
         if not all([full_name, email, password, role]):
             return {"error": "Missing required fields: full_name, email, password, role"}, 400
@@ -56,27 +57,28 @@ class Signup(Resource):
             if db.session.query(User).filter_by(email=email).first():
                 return {"error": "Email already registered"}, 409
 
-            # Get role template
+            # Get role template as default permissions
             job = db.session.query(JobDescription).filter_by(name=role).first()
             if not job:
                 return {"error": "Invalid role"}, 400
 
+            # Use custom permissions if provided, otherwise fall back to job role defaults
             user = User(
                 full_name=full_name,
                 email=email,
                 role=role,
-                can_read_branch=job.can_read_branch,
-                can_edit_branch=job.can_edit_branch,
-                can_delete_branch=job.can_delete_branch,
-                can_read_warehouse=job.can_read_warehouse,
-                can_edit_warehouse=job.can_edit_warehouse,
-                can_delete_warehouse=job.can_delete_warehouse,
-                can_read_asset=job.can_read_asset,
-                can_edit_asset=job.can_edit_asset,
-                can_delete_asset=job.can_delete_asset,
-                can_print_barcode=job.can_print_barcode,
-                can_make_report=job.can_make_report,
-                can_make_transaction=job.can_make_transaction,
+                can_read_branch=custom_permissions.get('can_read_branch', job.can_read_branch),
+                can_edit_branch=custom_permissions.get('can_edit_branch', job.can_edit_branch),
+                can_delete_branch=custom_permissions.get('can_delete_branch', job.can_delete_branch),
+                can_read_warehouse=custom_permissions.get('can_read_warehouse', job.can_read_warehouse),
+                can_edit_warehouse=custom_permissions.get('can_edit_warehouse', job.can_edit_warehouse),
+                can_delete_warehouse=custom_permissions.get('can_delete_warehouse', job.can_delete_warehouse),
+                can_read_asset=custom_permissions.get('can_read_asset', job.can_read_asset),
+                can_edit_asset=custom_permissions.get('can_edit_asset', job.can_edit_asset),
+                can_delete_asset=custom_permissions.get('can_delete_asset', job.can_delete_asset),
+                can_print_barcode=custom_permissions.get('can_print_barcode', job.can_print_barcode),
+                can_make_report=custom_permissions.get('can_make_report', job.can_make_report),
+                can_make_transaction=custom_permissions.get('can_make_transaction', job.can_make_transaction),
             )
             user.set_password(password)
 

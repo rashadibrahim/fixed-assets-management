@@ -131,7 +131,21 @@ user_input_model = api.model('UserInput', {
     'full_name': fields.String(required=True, description='User full name'),
     'email': fields.String(required=True, description='User email address'),
     'password': fields.String(required=True, description='User password'),
-    'role': fields.String(required=True, description='User role')
+    'role': fields.String(required=True, description='User role'),
+    'permissions': fields.Nested(api.model('UserPermissionsInput', {
+        'can_read_branch': fields.Boolean(description='Permission to read branches'),
+        'can_edit_branch': fields.Boolean(description='Permission to edit branches'),
+        'can_delete_branch': fields.Boolean(description='Permission to delete branches'),
+        'can_read_warehouse': fields.Boolean(description='Permission to read warehouses'),
+        'can_edit_warehouse': fields.Boolean(description='Permission to edit warehouses'),
+        'can_delete_warehouse': fields.Boolean(description='Permission to delete warehouses'),
+        'can_read_asset': fields.Boolean(description='Permission to read assets'),
+        'can_edit_asset': fields.Boolean(description='Permission to edit assets'),
+        'can_delete_asset': fields.Boolean(description='Permission to delete assets'),
+        'can_print_barcode': fields.Boolean(description='Permission to print barcodes'),
+        'can_make_report': fields.Boolean(description='Permission to make reports'),
+        'can_make_transaction': fields.Boolean(description='Permission to make transactions')
+    }), required=False, description='Custom user permissions (optional, defaults to role permissions)')
 })
 
 user_update_model = api.model('UserUpdate', {

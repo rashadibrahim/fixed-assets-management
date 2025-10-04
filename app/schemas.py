@@ -1,4 +1,4 @@
-from marshmallow import Schema, fields, validates, ValidationError, post_load
+from marshmallow import Schema, fields, validates, ValidationError, post_load, INCLUDE
 from decimal import Decimal
 from .models import db, Category, Branch, Warehouse, FixedAsset, Transaction
 
@@ -200,6 +200,7 @@ class UserCreateSchema(Schema):
     email = fields.Email(required=True)
     password = fields.Str(required=True)
     role = fields.Str(required=True)
+    permissions = fields.Dict(required=False)
 
 
 class UserUpdateSchema(Schema):
