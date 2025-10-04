@@ -32,15 +32,17 @@ class BranchList(Resource):
     @branches_ns.response(503, 'Service Unavailable', error_model)
     @branches_ns.param('page', 'Page number for pagination', type='integer', default=1)
     @branches_ns.param('per_page', 'Number of items per page', type='integer', default=10)
+    @branches_ns.param('search', 'Search in branch name', type=str)
     @jwt_required()
     def get(self):
-        """Get all branches with pagination, including warehouses count and assets count"""
+        """Get all branches with pagination, including warehouses count and optional search"""
         error = check_permission("can_read_branch")
         if error:
             return error
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
+        search = request.args.get("search", "").strip()
         
         # Validate pagination parameters
         if page < 1:
@@ -49,10 +51,21 @@ class BranchList(Resource):
             return {"error": "Items per page must be between 1 and 100"}, 400
 
         try:
-            query = db.session.query(Branch).paginate(page=page, per_page=per_page, error_out=False)
+            query = db.session.query(Branch)
+            
+            # Apply search filter if provided
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.filter(Branch.name_en.ilike(search_pattern))
+            
+            # Order results by name
+            query = query.order_by(Branch.name_en)
+
+            # Apply pagination
+            paginated = query.paginate(page=page, per_page=per_page, error_out=False)
 
             branches_data = []
-            for branch in query.items:
+            for branch in paginated.items:
                 branch_dict = branch_schema.dump(branch)
 
                 # Count warehouses in this branch
@@ -62,9 +75,9 @@ class BranchList(Resource):
 
             return {
                 "items": branches_data,
-                "total": query.total,
-                "page": query.page,
-                "pages": query.pages
+                "total": paginated.total,
+                "page": paginated.page,
+                "pages": paginated.pages
             }
         except OperationalError as e:
             logging.error(f"Database operational error in branch list: {str(e)}")

@@ -26,17 +26,44 @@ class CategoryList(Resource):
     @categories_ns.marshal_with(pagination_model)
     @categories_ns.param('page', 'Page number', type=int, default=1)
     @categories_ns.param('per_page', 'Items per page', type=int, default=10)
+    @categories_ns.param('search', 'Search in category or subcategory names', type=str)
+    @categories_ns.param('subcategory', 'Filter by subcategory name', type=str)
     @jwt_required()
     def get(self):
-        """Get all categories with pagination"""
+        """Get all categories with pagination and optional search/filtering
+        
+        - search: Searches in both category and subcategory fields
+        - subcategory: Filters by specific subcategory name
+        """
         error = check_permission("can_read_asset")
         if error:
             return error
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
+        search = request.args.get("search", "").strip()
+        subcategory_filter = request.args.get("subcategory", "").strip()
 
-        paginated = Category.query.paginate(page=page, per_page=per_page)
+        query = Category.query
+        
+        # Apply search filter if provided (searches in both category and subcategory)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Category.category.ilike(search_pattern),
+                    Category.subcategory.ilike(search_pattern)
+                )
+            )
+        
+        # Apply subcategory filter if provided
+        if subcategory_filter:
+            query = query.filter(Category.subcategory.ilike(f"%{subcategory_filter}%"))
+
+        # Order results by category name, then subcategory
+        query = query.order_by(Category.category, Category.subcategory)
+
+        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
         return {
             "items": categories_schema.dump(paginated.items),
             "total": paginated.total,

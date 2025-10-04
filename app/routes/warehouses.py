@@ -31,15 +31,17 @@ class WarehouseList(Resource):
     @warehouses_ns.response(503, 'Service Unavailable', error_model)
     @warehouses_ns.param('page', 'Page number for pagination', type='integer', default=1)
     @warehouses_ns.param('per_page', 'Number of items per page', type='integer', default=10)
+    @warehouses_ns.param('search', 'Search in warehouse English name', type=str)
     @jwt_required()
     def get(self):
-        """Get all warehouses with pagination"""
+        """Get all warehouses with pagination and optional search"""
         error = check_permission("can_read_warehouse")
         if error:
             return error
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
+        search = request.args.get("search", "").strip()
         
         # Validate pagination parameters
         if page < 1:
@@ -48,13 +50,24 @@ class WarehouseList(Resource):
             return {"error": "Items per page must be between 1 and 100"}, 400
 
         try:
-            query = db.session.query(Warehouse).paginate(page=page, per_page=per_page, error_out=False)
+            query = db.session.query(Warehouse)
+            
+            # Apply search filter if provided
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.filter(Warehouse.name_en.ilike(search_pattern))
+            
+            # Order results by English name
+            query = query.order_by(Warehouse.name_en)
+            
+            # Apply pagination
+            paginated = query.paginate(page=page, per_page=per_page, error_out=False)
             
             return {
-                "items": warehouses_schema.dump(query.items),
-                "total": query.total,
-                "page": query.page,
-                "pages": query.pages
+                "items": warehouses_schema.dump(paginated.items),
+                "total": paginated.total,
+                "page": paginated.page,
+                "pages": paginated.pages
             }
         except OperationalError as e:
             logging.error(f"Database operational error in warehouse list: {str(e)}")

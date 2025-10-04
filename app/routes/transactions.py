@@ -992,7 +992,8 @@ class TransactionDownloadResource(Resource):
 class GenerateReport(Resource):
     @transactions_ns.doc('generate_report', security='Bearer Auth')
     @transactions_ns.param('date', 'Filter by exact date (YYYY-MM-DD) - REQUIRED', type=str, required=True)
-    @transactions_ns.param('category_ids', 'Filter by category IDs (comma-separated, e.g., "1,2,3")', type=str)
+    @transactions_ns.param('category', 'Filter by category name', type=str)
+    @transactions_ns.param('subcategory', 'Filter by subcategory name', type=str)
     @transactions_ns.param('branch_id', 'Filter by branch ID', type=int)
     @transactions_ns.param('warehouse_id', 'Filter by warehouse ID', type=int)
     @jwt_required()
@@ -1008,7 +1009,8 @@ class GenerateReport(Resource):
         
         REQUIRED: date parameter must be provided
         Optional filters can be combined:
-        - Categories: ?category_ids=1,2,3
+        - Category: ?category=Electronics
+        - Subcategory: ?subcategory=Laptops (can be used with or without category)
         - Branch/Warehouse: ?branch_id=1 or ?warehouse_id=1
         """
         error = check_permission("can_make_report")
@@ -1020,7 +1022,8 @@ class GenerateReport(Resource):
         if not exact_date:
             return {"error": "Date parameter is required. Use format: YYYY-MM-DD"}, 400
 
-        category_ids_param = request.args.get("category_ids")
+        category_name = request.args.get("category")
+        subcategory_name = request.args.get("subcategory")
         branch_id = request.args.get("branch_id", type=int)
         warehouse_id = request.args.get("warehouse_id", type=int)
 
@@ -1055,7 +1058,8 @@ class GenerateReport(Resource):
                         'generated_at': datetime.now().isoformat(),
                         'filters_applied': {
                             'date': exact_date,
-                            'category_ids': category_ids_param,
+                            'category': category_name,
+                            'subcategory': subcategory_name,
                             'branch_id': branch_id,
                             'warehouse_id': warehouse_id
                         },
@@ -1153,15 +1157,14 @@ class GenerateReport(Resource):
                 AssetTransaction.transaction_id.in_(filtered_transaction_ids)
             )
 
-            # Step 7: Apply category filter if provided
-            if category_ids_param:
-                try:
-                    category_ids = [int(id.strip()) for id in category_ids_param.split(',') if id.strip()]
-                    if category_ids:
-                        print(f"Filtering by category_ids: {category_ids}")
-                        query = query.filter(FixedAsset.category_id.in_(category_ids))
-                except ValueError:
-                    return {"error": "Invalid category_ids format. Use comma-separated integers (e.g., '1,2,3')"}, 400
+            # Step 7: Apply category and subcategory filters if provided
+            if category_name:
+                print(f"Filtering by category: {category_name}")
+                query = query.filter(Category.category == category_name)
+            
+            if subcategory_name:
+                print(f"Filtering by subcategory: {subcategory_name}")
+                query = query.filter(Category.subcategory == subcategory_name)
 
             # Step 8: Group by asset to get asset-level aggregations
             query = query.group_by(
@@ -1229,7 +1232,8 @@ class GenerateReport(Resource):
                     'generated_at': datetime.now().isoformat(),
                     'filters_applied': {
                         'date': exact_date,
-                        'category_ids': category_ids_param,
+                        'category': category_name,
+                        'subcategory': subcategory_name,
                         'branch_id': branch_id,
                         'warehouse_id': warehouse_id
                     },

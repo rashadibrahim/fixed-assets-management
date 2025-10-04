@@ -37,7 +37,7 @@ class Warehouse(db.Model):
 class Category(db.Model):
     __tablename__ = "categories"
     id = db.Column(db.Integer, primary_key=True)
-    category = db.Column(db.String(100), nullable=False)
+    category = db.Column(db.String(100), unique=True, nullable=False)
     subcategory = db.Column(db.String(100), nullable=True)
     
     # Relationship with FixedAsset
