@@ -7,7 +7,7 @@ from .. import db
 from ..models import Branch
 from ..schemas import BranchSchema, WarehouseSchema
 from flask_jwt_extended import jwt_required
-from ..utils import check_permission, error_response
+from ..utils import check_permission, error_response, create_error_response, create_validation_error_response
 from ..swagger import branches_ns, add_standard_responses
 from ..swagger_models import (
     branch_model, branch_input_model, branch_with_warehouses_model,
@@ -46,9 +46,9 @@ class BranchList(Resource):
         
         # Validate pagination parameters
         if page < 1:
-            return {"error": "Page number must be positive"}, 400
+            return create_error_response("Page number must be positive", 400, "page")
         if per_page < 1 or per_page > 100:
-            return {"error": "Items per page must be between 1 and 100"}, 400
+            return create_error_response("Items per page must be between 1 and 100", 400, "per_page")
 
         try:
             query = db.session.query(Branch)
@@ -81,13 +81,13 @@ class BranchList(Resource):
             }
         except OperationalError as e:
             logging.error(f"Database operational error in branch list: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error in branch list: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error in branch list: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
     @branches_ns.doc('create_branch')
@@ -109,13 +109,13 @@ class BranchList(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
 
         try:
             try:
                 data = branch_schema.load(json_data)
             except ValidationError as err:
-                return {"error": "Validation error", "details": err.messages}, 400
+                return create_validation_error_response(err.messages)
 
             branch = Branch(**data)
             db.session.add(branch)
@@ -126,20 +126,20 @@ class BranchList(Resource):
             db.session.rollback()
             logging.error(f"Integrity error creating branch: {str(e)}")
             if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
-                return {"error": "Branch with this name already exists"}, 409
-            return {"error": "Data integrity constraint violation"}, 409
+                return create_error_response("Branch with this name already exists", 409)
+            return create_error_response("Data integrity constraint violation", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error creating branch: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error creating branch: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error creating branch: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
 @branches_ns.route("/<int:branch_id>")
@@ -161,7 +161,7 @@ class BranchResource(Resource):
         try:
             branch = db.session.query(Branch).filter_by(id=branch_id).first()
             if not branch:
-                return {"error": "Branch not found"}, 404
+                return create_error_response("Branch not found", 404)
                 
             branch_data = branch_schema.dump(branch)
             # Add warehouse count to the response
@@ -173,13 +173,13 @@ class BranchResource(Resource):
             return branch_data
         except OperationalError as e:
             logging.error(f"Database operational error getting branch {branch_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error getting branch {branch_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error getting branch {branch_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
     @branches_ns.doc('update_branch')
     @branches_ns.expect(branch_input_model, validate=False)
@@ -201,23 +201,28 @@ class BranchResource(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
 
         try:
             branch = db.session.query(Branch).filter_by(id=branch_id).first()
             if not branch:
-                return {"error": "Branch not found"}, 404
+                return create_error_response("Branch not found", 404)
 
             try:
                 data = branch_schema.load(json_data, partial=True)
             except ValidationError as err:
-                return {"error": "Validation error", "details": err.messages}, 400
+                return create_validation_error_response(err.messages)
 
             # Check for name uniqueness if name is being updated
-            if "name" in data and data["name"] != branch.name:
-                existing_branch = db.session.query(Branch).filter_by(name=data["name"]).first()
+            if "name_en" in data and data["name_en"] != branch.name_en:
+                existing_branch = db.session.query(Branch).filter_by(name_en=data["name_en"]).first()
                 if existing_branch:
-                    return {"error": "Branch with this name already exists"}, 409
+                    return create_error_response("Branch with this English name already exists", 409, "name_en")
+            
+            if "name_ar" in data and data["name_ar"] != branch.name_ar:
+                existing_branch = db.session.query(Branch).filter_by(name_ar=data["name_ar"]).first()
+                if existing_branch:
+                    return create_error_response("Branch with this Arabic name already exists", 409, "name_ar")
 
             for key, value in data.items():
                 setattr(branch, key, value)
@@ -228,20 +233,20 @@ class BranchResource(Resource):
             db.session.rollback()
             logging.error(f"Integrity error updating branch {branch_id}: {str(e)}")
             if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
-                return {"error": "Branch with this name already exists"}, 409
-            return {"error": "Data integrity constraint violation"}, 409
+                return create_error_response("Branch with this name already exists", 409)
+            return create_error_response("Data integrity constraint violation", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error updating branch {branch_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error updating branch {branch_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error updating branch {branch_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
     @branches_ns.doc('delete_branch')
     @branches_ns.response(200, 'Successfully deleted branch', success_model)
@@ -261,7 +266,7 @@ class BranchResource(Resource):
         try:
             branch = db.session.query(Branch).filter_by(id=branch_id).first()
             if not branch:
-                return {"error": "Branch not found"}, 404
+                return create_error_response("Branch not found", 404)
                 
             db.session.delete(branch)
             db.session.commit()
@@ -269,16 +274,16 @@ class BranchResource(Resource):
         except IntegrityError as e:
             db.session.rollback()
             logging.error(f"Integrity error deleting branch {branch_id}: {str(e)}")
-            return {"error": "Cannot delete branch: it may be referenced by warehouses or other records"}, 409
+            return create_error_response("Cannot delete branch: it may be referenced by warehouses or other records", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error deleting branch {branch_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error deleting branch {branch_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error deleting branch {branch_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)

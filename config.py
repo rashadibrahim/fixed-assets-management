@@ -15,10 +15,11 @@ class Config:
     DB_NAME = 'fixed_assets_management_db'
     DB_USER = 'belal'
     DB_PASSWORD = 'belal'  # Your actual password here
-    LOCAL_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}" #"sqlite:///fixed_assets.db"
+    LOCAL_URL = "sqlite:///fixed_assets.db" #f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}" 
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-key")
     # Build the database URI directly
-    SQLALCHEMY_DATABASE_URI = "postgresql+psycopg2://postgres:yrbAGRBiCpuXYNQmPuUxmbiwQzruQrpt@postgres.railway.internal:5432/railway"
+    DB_URL = os.environ.get("DATABASE_URL", LOCAL_URL)
+    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:yrbAGRBiCpuXYNQmPuUxmbiwQzruQrpt@mainline.proxy.rlwy.net:18823/railway"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # File upload configuration

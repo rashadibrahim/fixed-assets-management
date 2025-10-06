@@ -54,6 +54,52 @@ def handle_validation_exception(e):
     return error_response(str(e), 400)
 
 
+# NEW STANDARDIZED ERROR RESPONSE FUNCTIONS
+def create_error_response(message, status_code=400, field=None):
+    """
+    Create a standardized error response
+    
+    Args:
+        message (str): Error message to display
+        status_code (int): HTTP status code
+        field (str, optional): Specific field that caused the error
+    
+    Returns:
+        tuple: (error_dict, status_code)
+    """
+    error_response = {
+        "error": message,
+        "status_code": status_code
+    }
+    
+    if field:
+        error_response["field"] = field
+        
+    return error_response, status_code
+
+def create_validation_error_response(validation_errors, status_code=400):
+    """
+    Create a standardized validation error response
+    
+    Args:
+        validation_errors (dict): Validation errors from marshmallow
+        status_code (int): HTTP status code
+    
+    Returns:
+        tuple: (error_dict, status_code)
+    """
+    # Extract first error message for main error field
+    first_field = next(iter(validation_errors))
+    first_error = validation_errors[first_field][0] if isinstance(validation_errors[first_field], list) else validation_errors[first_field]
+    
+    error_response = {
+        "error": f"Validation failed: {first_error}",
+        "status_code": status_code,
+        "field": first_field,
+        "validation_errors": validation_errors
+    }
+    
+    return error_response, status_code
 
 
 def check_permission(permission_field):
@@ -62,10 +108,10 @@ def check_permission(permission_field):
     user = User.query.get(identity)
 
     if not user:
-        return jsonify({"error": "User not found"}), 404
+        return create_error_response("User not found", 404)
 
     if not getattr(user, permission_field, False):
-        return jsonify({"error": f"Permission '{permission_field}' denied"}), 403
+        return create_error_response(f"Permission '{permission_field}' denied", 403)
 
     return None  # Means permission granted
 
@@ -78,7 +124,7 @@ def admin_required(fn):
         user = User.query.get(identity)
 
         if not user or user.role.lower() != "admin":
-            return jsonify({"error": "Admin access required"}), 403
+            return create_error_response("Admin access required", 403)
 
         return fn(*args, **kwargs)
     return wrapper

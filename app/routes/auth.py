@@ -8,7 +8,7 @@ from ..models import User, JobDescription, Branch, Warehouse, FixedAsset
 from ..schemas import UserSchema, UserCreateSchema, UserUpdateSchema
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 import datetime
-from ..utils import admin_required, check_permission, error_response
+from ..utils import admin_required, check_permission, error_response, create_error_response, create_validation_error_response
 from ..swagger import auth_ns, add_standard_responses
 from ..swagger_models import (
     user_model, user_input_model, user_update_model, login_model, 
@@ -36,12 +36,12 @@ class Signup(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
 
         try:
             data = user_create_schema.load(json_data)
         except ValidationError as err:
-            return {"error": "Validation error", "details": err.messages}, 400
+            return create_validation_error_response(err.messages)
 
         full_name = data.get("full_name")
         email = data.get("email")
@@ -50,17 +50,17 @@ class Signup(Resource):
         custom_permissions = data.get("permissions", {})
 
         if not all([full_name, email, password, role]):
-            return {"error": "Missing required fields: full_name, email, password, role"}, 400
+            return create_error_response("Missing required fields: full_name, email, password, role", 400)
 
         try:
             # Check if email already exists
             if db.session.query(User).filter_by(email=email).first():
-                return {"error": "Email already registered"}, 409
+                return create_error_response("Email already registered", 409, "email")
 
             # Get role template as default permissions
             job = db.session.query(JobDescription).filter_by(name=role).first()
             if not job:
-                return {"error": "Invalid role"}, 400
+                return create_error_response("Invalid role", 400, "role")
 
             # Use custom permissions if provided, otherwise fall back to job role defaults
             user = User(
@@ -90,20 +90,103 @@ class Signup(Resource):
             db.session.rollback()
             logging.error(f"Integrity error creating user: {str(e)}")
             if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
-                return {"error": "Email already registered"}, 409
-            return {"error": "Data integrity constraint violation"}, 409
+                return create_error_response("Email already registered", 409, "email")
+            return create_error_response("Data integrity constraint violation", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error creating user: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error creating user: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error creating user: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
+
+
+@auth_ns.route("/register")
+class Register(Resource):
+    @auth_ns.doc('register')
+    @auth_ns.expect(user_input_model)
+    @auth_ns.response(201, 'Successfully created user', user_model)
+    @auth_ns.response(400, 'Bad Request', error_model)
+    @auth_ns.response(409, 'Conflict - Email already exists', error_model)
+    @auth_ns.response(500, 'Internal Server Error', error_model)
+    def post(self):
+        """Register a new user (alternative endpoint)"""
+        # Validate request body
+        json_data = request.get_json()
+        if not json_data:
+            return create_error_response("Request body is required", 400)
+
+        try:
+            data = user_create_schema.load(json_data)
+        except ValidationError as err:
+            return create_validation_error_response(err.messages)
+
+        full_name = data.get("full_name")
+        email = data.get("email")
+        password = data.get("password")
+        role = data.get("role")
+        custom_permissions = data.get("permissions", {})
+
+        if not all([full_name, email, password, role]):
+            return create_error_response("Missing required fields: full_name, email, password, role", 400)
+
+        try:
+            # Check if email already exists
+            if db.session.query(User).filter_by(email=email).first():
+                return create_error_response("Email already registered", 409, "email")
+
+            # Get role template as default permissions
+            job = db.session.query(JobDescription).filter_by(name=role).first()
+            if not job:
+                return create_error_response("Invalid role", 400, "role")
+
+            # Use custom permissions if provided, otherwise fall back to job role defaults
+            user = User(
+                full_name=full_name,
+                email=email,
+                role=role,
+                can_read_branch=custom_permissions.get('can_read_branch', job.can_read_branch),
+                can_edit_branch=custom_permissions.get('can_edit_branch', job.can_edit_branch),
+                can_delete_branch=custom_permissions.get('can_delete_branch', job.can_delete_branch),
+                can_read_warehouse=custom_permissions.get('can_read_warehouse', job.can_read_warehouse),
+                can_edit_warehouse=custom_permissions.get('can_edit_warehouse', job.can_edit_warehouse),
+                can_delete_warehouse=custom_permissions.get('can_delete_warehouse', job.can_delete_warehouse),
+                can_read_asset=custom_permissions.get('can_read_asset', job.can_read_asset),
+                can_edit_asset=custom_permissions.get('can_edit_asset', job.can_edit_asset),
+                can_delete_asset=custom_permissions.get('can_delete_asset', job.can_delete_asset),
+                can_print_barcode=custom_permissions.get('can_print_barcode', job.can_print_barcode),
+                can_make_report=custom_permissions.get('can_make_report', job.can_make_report),
+                can_make_transaction=custom_permissions.get('can_make_transaction', job.can_make_transaction),
+            )
+            user.set_password(password)
+
+            db.session.add(user)
+            db.session.commit()
+
+            return user_schema.dump(user), 201
+        except IntegrityError as e:
+            db.session.rollback()
+            logging.error(f"Integrity error creating user: {str(e)}")
+            if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
+                return create_error_response("Email already registered", 409, "email")
+            return create_error_response("Data integrity constraint violation", 409)
+        except OperationalError as e:
+            db.session.rollback()
+            logging.error(f"Database operational error creating user: {str(e)}")
+            return create_error_response("Database connection error", 503)
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            logging.error(f"Database error creating user: {str(e)}")
+            return create_error_response("Database error occurred", 500)
+        except Exception as e:
+            db.session.rollback()
+            logging.error(f"Unexpected error creating user: {str(e)}")
+            return create_error_response("Internal server error", 500)
 
 
 @auth_ns.route("/login")
@@ -119,18 +202,18 @@ class Login(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
 
         email = json_data.get("email")
         password = json_data.get("password")
         
         if not email or not password:
-            return {"error": "Email and password are required"}, 400
+            return create_error_response("Email and password are required", 400)
 
         try:
             user = db.session.query(User).filter_by(email=email).first()
             if not user or not user.check_password(password):
-                return {"error": "Invalid email or password"}, 401
+                return create_error_response("Invalid email or password", 401)
 
             access_token = create_access_token(
                 identity=str(user.id), expires_delta=datetime.timedelta(hours=5)
@@ -138,13 +221,13 @@ class Login(Resource):
             return {"access_token": access_token, "user": user_schema.dump(user)}
         except OperationalError as e:
             logging.error(f"Database operational error during login: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error during login: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error during login: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
 @auth_ns.route("/me")
@@ -161,17 +244,17 @@ class Me(Resource):
             user_id = get_jwt_identity()
             user = db.session.query(User).get(user_id)
             if not user:
-                return {"error": "User not found"}, 404
+                return create_error_response("User not found", 404)
             return user_schema.dump(user)
         except OperationalError as e:
             logging.error(f"Database operational error getting current user: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error getting current user: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error getting current user: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
 @auth_ns.route("/users")
@@ -197,9 +280,9 @@ class UserList(Resource):
         
         # Validate pagination parameters
         if page < 1:
-            return {"error": "Page number must be positive"}, 400
+            return create_error_response("Page number must be positive", 400, "page")
         if per_page < 1 or per_page > 100:
-            return {"error": "Items per page must be between 1 and 100"}, 400
+            return create_error_response("Items per page must be between 1 and 100", 400, "per_page")
 
         try:
             query = db.session.query(User)
@@ -219,13 +302,13 @@ class UserList(Resource):
             }
         except OperationalError as e:
             logging.error(f"Database operational error in user list: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error in user list: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error in user list: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
 @auth_ns.route("/<int:user_id>")
@@ -246,18 +329,18 @@ class UserResource(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
 
         try:
             user = db.session.query(User).get(user_id)
             if not user:
-                return {"error": "User not found"}, 404
+                return create_error_response("User not found", 404)
 
             # Check for email uniqueness if email is being updated
             if "email" in json_data and json_data["email"] != user.email:
                 existing_user = db.session.query(User).filter_by(email=json_data["email"]).first()
                 if existing_user:
-                    return {"error": "Email already registered"}, 409
+                    return create_error_response("Email already registered", 409, "email")
 
             if "email" in json_data:
                 user.email = json_data["email"]
@@ -291,20 +374,20 @@ class UserResource(Resource):
             db.session.rollback()
             logging.error(f"Integrity error updating user {user_id}: {str(e)}")
             if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
-                return {"error": "Email already registered"}, 409
-            return {"error": "Data integrity constraint violation"}, 409
+                return create_error_response("Email already registered", 409, "email")
+            return create_error_response("Data integrity constraint violation", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error updating user {user_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error updating user {user_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error updating user {user_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
     @auth_ns.doc('delete_user', security='Bearer Auth')
     @auth_ns.response(200, 'Successfully deleted user', success_model)
@@ -320,7 +403,7 @@ class UserResource(Resource):
         try:
             user = db.session.query(User).get(user_id)
             if not user:
-                return {"error": "User not found"}, 404
+                return create_error_response("User not found", 404)
 
             db.session.delete(user)
             db.session.commit()
@@ -328,19 +411,19 @@ class UserResource(Resource):
         except IntegrityError as e:
             db.session.rollback()
             logging.error(f"Integrity error deleting user {user_id}: {str(e)}")
-            return {"error": "Cannot delete user: user may be referenced by other records"}, 409
+            return create_error_response("Cannot delete user: user may be referenced by other records", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error deleting user {user_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error deleting user {user_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error deleting user {user_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
 @auth_ns.route("/stats")
@@ -368,10 +451,10 @@ class Statistics(Resource):
             return stats, 200
         except OperationalError as e:
             logging.error(f"Database operational error getting statistics: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error getting statistics: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error getting statistics: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)

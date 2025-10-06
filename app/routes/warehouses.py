@@ -7,7 +7,7 @@ from .. import db
 from ..models import Warehouse
 from ..schemas import WarehouseSchema
 from flask_jwt_extended import jwt_required
-from ..utils import check_permission, error_response
+from ..utils import check_permission, error_response, create_error_response, create_validation_error_response
 from ..swagger import warehouses_ns, add_standard_responses
 from ..swagger_models import (
     warehouse_model, warehouse_input_model, 
@@ -45,9 +45,9 @@ class WarehouseList(Resource):
         
         # Validate pagination parameters
         if page < 1:
-            return {"error": "Page number must be positive"}, 400
+            return create_error_response("Page number must be positive", 400, "page")
         if per_page < 1 or per_page > 100:
-            return {"error": "Items per page must be between 1 and 100"}, 400
+            return create_error_response("Items per page must be between 1 and 100", 400, "per_page")
 
         try:
             query = db.session.query(Warehouse)
@@ -71,13 +71,13 @@ class WarehouseList(Resource):
             }
         except OperationalError as e:
             logging.error(f"Database operational error in warehouse list: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error in warehouse list: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error in warehouse list: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
     @warehouses_ns.doc('create_warehouse')
     @warehouses_ns.expect(warehouse_input_model)
@@ -96,14 +96,14 @@ class WarehouseList(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
             
         try:
             data = warehouse_schema.load(json_data)
         except ValidationError as err:
-            return {"error": "Validation error", "details": err.messages}, 400
+            return create_validation_error_response(err.messages)
         except Exception as e:
-            return {"error": "Invalid JSON format"}, 400
+            return create_error_response("Invalid JSON format", 400)
 
         try:
             warehouse = Warehouse(**data)
@@ -116,20 +116,20 @@ class WarehouseList(Resource):
             db.session.rollback()
             logging.error(f"Integrity error creating warehouse: {str(e)}")
             if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
-                return {"error": "Warehouse with this name already exists"}, 409
-            return {"error": "Data integrity constraint violation"}, 409
+                return create_error_response("Warehouse with this name already exists", 409)
+            return create_error_response("Data integrity constraint violation", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error creating warehouse: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error creating warehouse: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error creating warehouse: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
 
 @warehouses_ns.route("/<int:warehouse_id>")
@@ -151,17 +151,17 @@ class WarehouseResource(Resource):
         try:
             warehouse = db.session.query(Warehouse).filter_by(id=warehouse_id).first()
             if not warehouse:
-                return {"error": "Warehouse not found"}, 404
+                return create_error_response("Warehouse not found", 404)
             return warehouse_schema.dump(warehouse)
         except OperationalError as e:
             logging.error(f"Database operational error getting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             logging.error(f"Database error getting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             logging.error(f"Unexpected error getting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
     @warehouses_ns.doc('update_warehouse')
     @warehouses_ns.expect(warehouse_input_model, validate=False)
@@ -181,21 +181,21 @@ class WarehouseResource(Resource):
         # Validate request body
         json_data = request.get_json()
         if not json_data:
-            return {"error": "Request body is required"}, 400
+            return create_error_response("Request body is required", 400)
             
         try:
             warehouse = db.session.query(Warehouse).filter_by(id=warehouse_id).first()
             if not warehouse:
-                return {"error": "Warehouse not found"}, 404
+                return create_error_response("Warehouse not found", 404)
 
             # Validate and load data
             try:
                 # partial=True allows updating only some fields
                 data = warehouse_schema.load(json_data, partial=True)
             except ValidationError as err:
-                return {"error": "Validation error", "details": err.messages}, 400
+                return create_validation_error_response(err.messages)
             except Exception as e:
-                return {"error": "Invalid JSON format"}, 400
+                return create_error_response("Invalid JSON format", 400)
 
             # Apply changes
             for key, value in data.items():
@@ -211,20 +211,20 @@ class WarehouseResource(Resource):
             db.session.rollback()
             logging.error(f"Integrity error updating warehouse {warehouse_id}: {str(e)}")
             if "UNIQUE constraint failed" in str(e) or "Duplicate entry" in str(e):
-                return {"error": "Warehouse with this name already exists"}, 409
-            return {"error": "Data integrity constraint violation"}, 409
+                return create_error_response("Warehouse with this name already exists", 409)
+            return create_error_response("Data integrity constraint violation", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error updating warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error updating warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error updating warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)
 
     @warehouses_ns.doc('delete_warehouse')
     @warehouses_ns.response(200, 'Successfully deleted warehouse', success_model)
@@ -244,7 +244,7 @@ class WarehouseResource(Resource):
         try:
             warehouse = db.session.query(Warehouse).filter_by(id=warehouse_id).first()
             if not warehouse:
-                return {"error": "Warehouse not found"}, 404
+                return create_error_response("Warehouse not found", 404)
                 
             db.session.delete(warehouse)
             db.session.commit()
@@ -253,16 +253,16 @@ class WarehouseResource(Resource):
         except IntegrityError as e:
             db.session.rollback()
             logging.error(f"Integrity error deleting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Cannot delete warehouse: it may be referenced by other records"}, 409
+            return create_error_response("Cannot delete warehouse: it may be referenced by other records", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error deleting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Database connection error"}, 503
+            return create_error_response("Database connection error", 503)
         except SQLAlchemyError as e:
             db.session.rollback()
             logging.error(f"Database error deleting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Database error occurred"}, 500
+            return create_error_response("Database error occurred", 500)
         except Exception as e:
             db.session.rollback()
             logging.error(f"Unexpected error deleting warehouse {warehouse_id}: {str(e)}")
-            return {"error": "Internal server error"}, 500
+            return create_error_response("Internal server error", 500)

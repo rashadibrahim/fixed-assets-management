@@ -7,7 +7,7 @@ from .. import db
 from ..models import FixedAsset, Category
 from ..schemas import FixedAssetSchema, CategorySchema
 from flask_jwt_extended import jwt_required
-from ..utils import check_permission, generate_barcode, generate_unique_product_code
+from ..utils import check_permission, generate_barcode, generate_unique_product_code, create_error_response, create_validation_error_response
 from ..swagger import assets_ns, categories_ns, add_standard_responses, api
 from ..swagger_models import (
     asset_model, asset_input_model, category_model, category_input_model,
@@ -28,6 +28,8 @@ class CategoryList(Resource):
     @categories_ns.param('per_page', 'Items per page', type=int, default=10)
     @categories_ns.param('search', 'Search in category or subcategory names', type=str)
     @categories_ns.param('subcategory', 'Filter by subcategory name', type=str)
+    @categories_ns.response(401, 'Unauthorized', error_model)
+    @categories_ns.response(403, 'Forbidden', error_model)
     @jwt_required()
     def get(self):
         """Get all categories with pagination and optional search/filtering
@@ -74,6 +76,10 @@ class CategoryList(Resource):
     @categories_ns.doc('create_category', security='Bearer Auth')
     @categories_ns.expect(category_input_model)
     @categories_ns.marshal_with(category_model, code=201)
+    @categories_ns.response(400, 'Validation Error', error_model)
+    @categories_ns.response(401, 'Unauthorized', error_model)
+    @categories_ns.response(403, 'Forbidden', error_model)
+    @categories_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
     def post(self):
         """Create a new category"""
@@ -88,33 +94,27 @@ class CategoryList(Resource):
             db.session.commit()
             return category_schema.dump(new_category), 201
         except ValidationError as err:
-            return {"errors": err.messages}, 400
+            return create_validation_error_response(err.messages)
         except IntegrityError as e:
             db.session.rollback()
             error_str = str(e.orig)
             
             if "duplicate key value violates unique constraint" in error_str:
-                return {
-                    "error": "Duplicate entry",
-                    "message": "A category with this information already exists in the system."
-                }, 400
+                return create_error_response("A category with this information already exists in the system", 400)
             else:
-                return {
-                    "error": "Database constraint violation",
-                    "message": "The data provided violates database constraints."
-                }, 400
+                return create_error_response("The data provided violates database constraints", 400)
         except Exception as e:
             db.session.rollback()
-            return {
-                "error": "Internal server error",
-                "message": "An unexpected error occurred while creating the category."
-            }, 500
+            return create_error_response("An unexpected error occurred while creating the category", 500)
 
 
 @categories_ns.route("/<int:category_id>")
 class CategoryResource(Resource):
     @categories_ns.doc('get_category', security='Bearer Auth')
     @categories_ns.marshal_with(category_model)
+    @categories_ns.response(401, 'Unauthorized', error_model)
+    @categories_ns.response(403, 'Forbidden', error_model)
+    @categories_ns.response(404, 'Category not found', error_model)
     @jwt_required()
     def get(self, category_id):
         """Get a specific category"""
@@ -124,12 +124,17 @@ class CategoryResource(Resource):
 
         category = db.session.get(Category, category_id)
         if not category:
-            return {"error": "Category not found"}, 404
+            return create_error_response("Category not found", 404)
         return category_schema.dump(category)
 
     @categories_ns.doc('update_category', security='Bearer Auth')
     @categories_ns.expect(category_input_model)
     @categories_ns.marshal_with(category_model)
+    @categories_ns.response(400, 'Validation Error', error_model)
+    @categories_ns.response(401, 'Unauthorized', error_model)
+    @categories_ns.response(403, 'Forbidden', error_model)
+    @categories_ns.response(404, 'Category not found', error_model)
+    @categories_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
     def put(self, category_id):
         """Update a category"""
@@ -139,7 +144,7 @@ class CategoryResource(Resource):
 
         category = db.session.get(Category, category_id)
         if not category:
-            return {"error": "Category not found"}, 404
+            return create_error_response("Category not found", 404)
 
         try:
             data = category_schema.load(request.get_json(), partial=True)
@@ -148,30 +153,25 @@ class CategoryResource(Resource):
             db.session.commit()
             return category_schema.dump(category)
         except ValidationError as err:
-            return {"errors": err.messages}, 400
+            return create_validation_error_response(err.messages)
         except IntegrityError as e:
             db.session.rollback()
             error_str = str(e.orig)
             
             if "duplicate key value violates unique constraint" in error_str:
-                return {
-                    "error": "Duplicate entry",
-                    "message": "A category with this information already exists in the system."
-                }, 400
+                return create_error_response("A category with this information already exists in the system", 400)
             else:
-                return {
-                    "error": "Database constraint violation",
-                    "message": "The data provided violates database constraints."
-                }, 400
+                return create_error_response("The data provided violates database constraints", 400)
         except Exception as e:
             db.session.rollback()
-            return {
-                "error": "Internal server error",
-                "message": "An unexpected error occurred while updating the category."
-            }, 500
+            return create_error_response("An unexpected error occurred while updating the category", 500)
 
     @categories_ns.doc('delete_category', security='Bearer Auth')
     @categories_ns.marshal_with(success_model)
+    @categories_ns.response(400, 'Cannot delete category', error_model)
+    @categories_ns.response(401, 'Unauthorized', error_model)
+    @categories_ns.response(403, 'Forbidden', error_model)
+    @categories_ns.response(404, 'Category not found', error_model)
     @jwt_required()
     def delete(self, category_id):
         """Delete a category"""
@@ -181,7 +181,7 @@ class CategoryResource(Resource):
 
         category = db.session.get(Category, category_id)
         if not category:
-            return {"error": "Category not found"}, 404
+            return create_error_response("Category not found", 404)
 
         try:
             db.session.delete(category)
@@ -189,7 +189,7 @@ class CategoryResource(Resource):
             return {"message": f"Category {category_id} deleted successfully"}
         except Exception as e:
             db.session.rollback()
-            return {"error": "Cannot delete category with associated assets"}, 400
+            return create_error_response("Cannot delete category with associated assets", 400)
 
 @assets_ns.route("/")
 class AssetList(Resource):
@@ -198,6 +198,8 @@ class AssetList(Resource):
     @assets_ns.param('page', 'Page number', type=int, default=1)
     @assets_ns.param('per_page', 'Items per page', type=int, default=10)
     @assets_ns.param('category_id', 'Filter assets by category ID', type=int)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
     @jwt_required()
     def get(self):
         """Get all fixed assets with pagination and optional category filtering"""
@@ -224,6 +226,10 @@ class AssetList(Resource):
     @assets_ns.doc('create_asset', security='Bearer Auth')
     @assets_ns.expect(asset_input_model)
     @assets_ns.marshal_with(asset_model, code=201)
+    @assets_ns.response(400, 'Validation Error', error_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
     def post(self):
         """Create a new fixed asset"""
@@ -238,33 +244,20 @@ class AssetList(Resource):
             db.session.commit()
             return asset_schema.dump(new_asset), 201
         except ValidationError as err:
-            return {"errors": err.messages}, 400
+            return create_validation_error_response(err.messages)
         except IntegrityError as e:
             db.session.rollback()
             error_str = str(e.orig)
             
             if "duplicate key value violates unique constraint" in error_str and "product_code" in error_str:
-                return {
-                    "error": "Product code already exists",
-                    "message": "The product code you provided is already in use. Please use a different product code.",
-                    "field": "product_code"
-                }, 400
+                return create_error_response("The product code you provided is already in use. Please use a different product code", 400, "product_code")
             elif "duplicate key value violates unique constraint" in error_str:
-                return {
-                    "error": "Duplicate entry",
-                    "message": "A record with this information already exists in the system."
-                }, 400
+                return create_error_response("A record with this information already exists in the system", 400)
             else:
-                return {
-                    "error": "Database constraint violation",
-                    "message": "The data provided violates database constraints."
-                }, 400
+                return create_error_response("The data provided violates database constraints", 400)
         except Exception as e:
             db.session.rollback()
-            return {
-                "error": "Internal server error",
-                "message": "An unexpected error occurred while creating the asset."
-            }, 500
+            return create_error_response("An unexpected error occurred while creating the asset", 500)
 
 
 @assets_ns.route("/<int:asset_id>/barcode")
@@ -284,7 +277,7 @@ class AssetBarcode(Resource):
         # Get the asset
         asset = db.session.query(FixedAsset).filter_by(id=asset_id).first()
         if not asset:
-            return {"error": "Asset not found"}, 404
+            return create_error_response("Asset not found", 404)
             
         # Check if asset has a product code, if not generate one
         if not asset.product_code:
@@ -301,6 +294,9 @@ class AssetBarcode(Resource):
 class AssetResource(Resource):
     @assets_ns.doc('get_asset', security='Bearer Auth')
     @assets_ns.marshal_with(asset_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'Asset not found', error_model)
     @jwt_required()
     def get(self, asset_id):
         """Get a specific asset"""
@@ -310,12 +306,17 @@ class AssetResource(Resource):
 
         asset = db.session.get(FixedAsset, asset_id)
         if not asset:
-            return {"error": "Asset not found"}, 404
+            return create_error_response("Asset not found", 404)
         return asset_schema.dump(asset)
 
     @assets_ns.doc('update_asset', security='Bearer Auth')
     @assets_ns.expect(asset_input_model)
     @assets_ns.marshal_with(asset_model)
+    @assets_ns.response(400, 'Validation Error', error_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'Asset not found', error_model)
+    @assets_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
     def put(self, asset_id):
         """Update a specific asset"""
@@ -325,7 +326,7 @@ class AssetResource(Resource):
 
         asset = db.session.get(FixedAsset, asset_id)
         if not asset:
-            return {"error": "Asset not found"}, 404
+            return create_error_response("Asset not found", 404)
 
         try:
             data = asset_schema.load(request.get_json(), partial=True)
@@ -334,36 +335,26 @@ class AssetResource(Resource):
             db.session.commit()
             return asset_schema.dump(asset)
         except ValidationError as err:
-            return {"errors": err.messages}, 400
+            return create_validation_error_response(err.messages)
         except IntegrityError as e:
             db.session.rollback()
             error_str = str(e.orig)
             
             if "duplicate key value violates unique constraint" in error_str and "product_code" in error_str:
-                return {
-                    "error": "Product code already exists",
-                    "message": "The product code you provided is already in use by another asset. Please use a different product code.",
-                    "field": "product_code"
-                }, 400
+                return create_error_response("The product code you provided is already in use by another asset. Please use a different product code", 400, "product_code")
             elif "duplicate key value violates unique constraint" in error_str:
-                return {
-                    "error": "Duplicate entry",
-                    "message": "A record with this information already exists in the system."
-                }, 400
+                return create_error_response("A record with this information already exists in the system", 400)
             else:
-                return {
-                    "error": "Database constraint violation",
-                    "message": "The data provided violates database constraints."
-                }, 400
+                return create_error_response("The data provided violates database constraints", 400)
         except Exception as e:
             db.session.rollback()
-            return {
-                "error": "Internal server error",
-                "message": "An unexpected error occurred while updating the asset."
-            }, 500
+            return create_error_response("An unexpected error occurred while updating the asset", 500)
 
     @assets_ns.doc('delete_asset', security='Bearer Auth')
     @assets_ns.marshal_with(success_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(404, 'Asset not found', error_model)
     @jwt_required()
     def delete(self, asset_id):
         """Delete a specific asset"""
@@ -373,7 +364,7 @@ class AssetResource(Resource):
 
         asset = db.session.get(FixedAsset, asset_id)
         if not asset:
-            return {"error": "Asset not found"}, 404
+            return create_error_response("Asset not found", 404)
 
         db.session.delete(asset)
         db.session.commit()
@@ -390,6 +381,9 @@ class AssetSearch(Resource):
     @assets_ns.param('per_page', 'Items per page', type=int, default=10)
     @assets_ns.marshal_with(asset_search_response_model)
     @assets_ns.response(400, 'Missing Search Query', error_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(500, 'Search Error', error_model)
     @jwt_required()
     def get(self):
         """Search assets by name (text) or product code/barcode (number)
@@ -403,7 +397,7 @@ class AssetSearch(Resource):
 
         search_query = request.args.get('q', '').strip()
         if not search_query:
-            return {"error": "Search query parameter 'q' is required"}, 400
+            return create_error_response("Search query parameter 'q' is required", 400)
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
@@ -464,4 +458,4 @@ class AssetSearch(Resource):
             
         except Exception as e:
             print(f"Search error: {str(e)}")
-            return {"error": f"Search error: {str(e)}"}, 500
+            return create_error_response(f"Search error: {str(e)}", 500)
