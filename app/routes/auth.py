@@ -159,7 +159,7 @@ class Me(Resource):
         """Get current user information"""
         try:
             user_id = get_jwt_identity()
-            user = db.session.query(User).get(user_id)
+            user = db.session.query(User).get(int(user_id))
             if not user:
                 return {"error": "User not found"}, 404
             return user_schema.dump(user)
@@ -249,7 +249,7 @@ class UserResource(Resource):
             return {"error": "Request body is required"}, 400
 
         try:
-            user = db.session.query(User).get(user_id)
+            user = db.session.query(User).get(int(user_id))
             if not user:
                 return {"error": "User not found"}, 404
 
@@ -266,7 +266,7 @@ class UserResource(Resource):
             if "full_name" in json_data:
                 user.full_name = json_data["full_name"]
 
-            # ✅ Update permissions if provided
+            # Update permissions if provided
             if "permissions" in json_data:
                 perms = json_data["permissions"]
                 user.can_read_branch = perms.get("can_read_branch", user.can_read_branch)
@@ -318,7 +318,7 @@ class UserResource(Resource):
     def delete(self, user_id):
         """Delete a specific user by ID (Admin only)"""
         try:
-            user = db.session.query(User).get(user_id)
+            user = db.session.query(User).get(int(user_id))
             if not user:
                 return {"error": "User not found"}, 404
 
@@ -351,19 +351,39 @@ class Statistics(Resource):
     @auth_ns.response(403, 'Forbidden', error_model)
     @auth_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
-    @admin_required
+    # @admin_required
     def get(self):
-        """Get system statistics (Admin only)"""
+        """Get system statistics (requires read permissions)"""
         try:
-            stats = {
-                "total_branches": db.session.query(Branch).count(),
-                "total_warehouses": db.session.query(Warehouse).count(),
-                "total_assets": db.session.query(FixedAsset).count(),
-                "active_assets": db.session.query(FixedAsset).filter_by(is_active=True).count(),
-                "inactive_assets": db.session.query(FixedAsset).filter_by(is_active=False).count(),
-                "total_users": db.session.query(User).count(),
-                "job_roles_count": db.session.query(JobDescription).count()
-            }
+            # Get current user to check permissions
+            identity = get_jwt_identity()
+            user = db.session.query(User).get(int(identity))
+            
+            if not user:
+                return {"error": "User not found"}, 404
+            
+            stats = {}
+            
+            # Only include stats for entities the user can read
+            if user.can_read_branch:
+                stats["total_branches"] = db.session.query(Branch).count()
+            
+            if user.can_read_warehouse:
+                stats["total_warehouses"] = db.session.query(Warehouse).count()
+            
+            if user.can_read_asset:
+                stats["total_assets"] = db.session.query(FixedAsset).count()
+                stats["active_assets"] = db.session.query(FixedAsset).filter_by(is_active=True).count()
+                stats["inactive_assets"] = db.session.query(FixedAsset).filter_by(is_active=False).count()
+            
+            # User and job role counts only for admins
+            if user.role.lower() == "admin":
+                stats["total_users"] = db.session.query(User).count()
+                stats["job_roles_count"] = db.session.query(JobDescription).count()
+            
+            # If user has no read permissions, deny access
+            if not stats:
+                return {"error": "Insufficient permissions to view statistics"}, 403
 
             return stats, 200
         except OperationalError as e:

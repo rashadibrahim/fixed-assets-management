@@ -62,10 +62,10 @@ def check_permission(permission_field):
     user = User.query.get(identity)
 
     if not user:
-        return jsonify({"error": "User not found"}), 404
+        return {"error": "User not found"}, 404
 
     if not getattr(user, permission_field, False):
-        return jsonify({"error": f"Permission '{permission_field}' denied"}), 403
+        return {"error": f"Permission '{permission_field}' denied"}, 403
 
     return None  # Means permission granted
 
@@ -78,7 +78,7 @@ def admin_required(fn):
         user = User.query.get(identity)
 
         if not user or user.role.lower() != "admin":
-            return jsonify({"error": "Admin access required"}), 403
+            return {"error": "Admin access required"}, 403
 
         return fn(*args, **kwargs)
     return wrapper
