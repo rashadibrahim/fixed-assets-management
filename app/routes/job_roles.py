@@ -72,7 +72,7 @@ class JobRoleList(Resource):
     @job_roles_ns.response(409, 'Conflict - Duplicate entry', error_model)
     @job_roles_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
-    @admin_required()
+    @admin_required
     def post(self):
         """Create a new job role"""
         # Validate request body
