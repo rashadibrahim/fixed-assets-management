@@ -44,7 +44,8 @@ class JobRoleList(Resource):
             return {"error": "Items per page must be between 1 and 100"}, 400
 
         try:
-            query = db.session.query(JobDescription).paginate(page=page, per_page=per_page, error_out=False)
+            # Order by ID descending for consistent ordering
+            query = db.session.query(JobDescription).order_by(JobDescription.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
 
             return {
                 "items": job_roles_schema.dump(query.items),

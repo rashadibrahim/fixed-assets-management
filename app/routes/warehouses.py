@@ -57,8 +57,8 @@ class WarehouseList(Resource):
                 search_pattern = f"%{search}%"
                 query = query.filter(Warehouse.name_en.ilike(search_pattern))
             
-            # Order results by English name
-            query = query.order_by(Warehouse.name_en)
+            # Order results by ID descending for consistent ordering
+            query = query.order_by(Warehouse.id.desc())
             
             # Apply pagination
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)

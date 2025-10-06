@@ -209,6 +209,9 @@ class UserList(Resource):
             if name:
                 query = query.filter(User.full_name.ilike(f"%{name}%"))
 
+            # Order by ID descending for consistent ordering
+            query = query.order_by(User.id.desc())
+
             pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
             return {
