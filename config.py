@@ -19,7 +19,9 @@ class Config:
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-key")
     # Build the database URI directly
     DB_URL = os.environ.get("DATABASE_URL", LOCAL_URL)
-    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:yrbAGRBiCpuXYNQmPuUxmbiwQzruQrpt@mainline.proxy.rlwy.net:18823/railway"
+    SQLALCHEMY_DATABASE_URI = DB_URL
+    # SQLALCHEMY_DATABASE_URI = LOCAL_URL
+    
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # File upload configuration
@@ -29,5 +31,5 @@ class Config:
     # Ensure upload directory exists
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     
-    print(f"🔧 Config loaded - User: {DB_USER}, Host: {DB_HOST}, Port: {DB_PORT}, DB: {DB_NAME}")
-    print(f"🔧 Database URI: postgresql://***:***@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+    print(f"Config loaded - User: {DB_USER}, Host: {DB_HOST}, Port: {DB_PORT}, DB: {DB_NAME}")
+    print(f"Database URI: postgresql://***:***@{DB_HOST}:{DB_PORT}/{DB_NAME}")

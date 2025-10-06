@@ -168,8 +168,8 @@ class TransactionList(Resource):
                     Transaction.reference_number.contains(search)
                 ))
 
-            # Order by date descending (newest first)
-            query = query.order_by(Transaction.date.desc(), Transaction.created_at.desc())
+            # Order by ID descending for consistent ordering
+            query = query.order_by(Transaction.id.desc())
 
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)
             return {
@@ -528,6 +528,9 @@ class TransactionAssetsList(Resource):
                 return create_error_response("Transaction not found", 404)
 
             query = AssetTransaction.query.filter_by(transaction_id=transaction_id)
+            
+            # Order by ID descending for consistent ordering
+            query = query.order_by(AssetTransaction.id.desc())
 
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)
             return {

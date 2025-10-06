@@ -44,7 +44,8 @@ class JobRoleList(Resource):
             return create_error_response("Items per page must be between 1 and 100", 400, "per_page")
 
         try:
-            query = db.session.query(JobDescription).paginate(page=page, per_page=per_page, error_out=False)
+            # Order by ID descending for consistent ordering
+            query = db.session.query(JobDescription).order_by(JobDescription.id.desc()).paginate(page=page, per_page=per_page, error_out=False)
 
             return {
                 "items": job_roles_schema.dump(query.items),
@@ -70,8 +71,8 @@ class JobRoleList(Resource):
     @job_roles_ns.response(403, 'Forbidden', error_model)
     @job_roles_ns.response(409, 'Conflict - Duplicate entry', error_model)
     @job_roles_ns.response(500, 'Internal Server Error', error_model)
-    # @jwt_required()
-    # @admin_required()
+    @jwt_required()
+    @admin_required()
     def post(self):
         """Create a new job role"""
         # Validate request body

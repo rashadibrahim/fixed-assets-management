@@ -58,8 +58,8 @@ class BranchList(Resource):
                 search_pattern = f"%{search}%"
                 query = query.filter(Branch.name_en.ilike(search_pattern))
             
-            # Order results by name
-            query = query.order_by(Branch.name_en)
+            # Order results by ID descending for consistent ordering
+            query = query.order_by(Branch.id.desc())
 
             # Apply pagination
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)

@@ -20,14 +20,14 @@ with app.app_context():
     try:
         # Create all tables
         db.create_all()
-        logging.info("✅ Database tables created successfully")
+        logging.info("Database tables created successfully")
         
         # Verify connection by running a simple query
         result = db.session.execute(db.text("SELECT 1"))
-        logging.info("✅ Database connection verified")
+        logging.info("Database connection verified")
         
     except Exception as e:
-        logging.error(f"❌ Database initialization failed: {e}")
+        logging.error(f"Database initialization failed: {e}")
         exit(1)
 
 # Helpful shell context for `flask shell` or when using python manage.py shell
@@ -38,7 +38,7 @@ def make_shell_context():
 if __name__ == "__main__":
     try:
         # Start the Flask application
-        print("🚀 Starting Flask application...")
+        print("Starting Flask application...")
         # app.run(host="0.0.0.0", port=8000, debug=True, threaded=True) # For development
         app.run(host="0.0.0.0",threaded=True) # For production
     except Exception as e:

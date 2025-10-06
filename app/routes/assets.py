@@ -62,8 +62,8 @@ class CategoryList(Resource):
         if subcategory_filter:
             query = query.filter(Category.subcategory.ilike(f"%{subcategory_filter}%"))
 
-        # Order results by category name, then subcategory
-        query = query.order_by(Category.category, Category.subcategory)
+        # Order results by ID descending for consistent ordering
+        query = query.order_by(Category.id.desc())
 
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
         return {
@@ -214,6 +214,9 @@ class AssetList(Resource):
         query = FixedAsset.query
         if category_id:
             query = query.filter_by(category_id=category_id)
+
+        # Order by ID descending for consistent ordering
+        query = query.order_by(FixedAsset.id.desc())
 
         paginated = query.paginate(page=page, per_page=per_page)
         return {
@@ -438,13 +441,8 @@ class AssetSearch(Resource):
                     "pages": 0
                 }
             
-            # Order results
-            if search_query.isdigit():
-                # For numeric queries, order by product_code match, then by name
-                query = query.order_by(FixedAsset.product_code, FixedAsset.name_en)
-            else:
-                # For text queries, order by name
-                query = query.order_by(FixedAsset.name_en, FixedAsset.name_ar)
+            # Order results by ID descending for consistent ordering
+            query = query.order_by(FixedAsset.id.desc())
             
             # Execute paginated query
             paginated = query.paginate(page=page, per_page=per_page, error_out=False)
