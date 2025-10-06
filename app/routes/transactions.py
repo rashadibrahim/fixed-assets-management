@@ -304,10 +304,12 @@ class TransactionList(Resource):
                 # Check if OUT transaction has enough quantity
                 if not transaction_type:  # OUT transaction
                     if asset.quantity < asset_trans_data['quantity']:
+                        beforeRollback = asset.quantity 
                         db.session.rollback()
+                        afterRollback = asset.quantity - beforeRollback
                         return create_error_response(
                             f"Insufficient quantity for asset {asset.name_en}. "
-                            f"Available: {asset.quantity}, Requested: {asset_trans_data['quantity']}",
+                            f"Available: {asset.quantity}, Requested: {asset_trans_data['quantity'] + afterRollback}",
                             409, "quantity"
                         )
                 
