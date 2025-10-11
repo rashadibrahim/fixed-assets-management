@@ -7,8 +7,8 @@ from sqlalchemy import Numeric
 class Branch(db.Model):
     __tablename__ = "branches"
     id = db.Column(db.Integer, primary_key=True)
-    name_ar = db.Column(db.String(255), nullable=False)
-    name_en = db.Column(db.String(255), nullable=False)
+    name_ar = db.Column(db.String(255), nullable=False, unique=True)
+    name_en = db.Column(db.String(255), nullable=False, unique=True)
     address_ar = db.Column(db.String(500), nullable=False)
     address_en = db.Column(db.String(500), nullable=False)
 
@@ -22,8 +22,8 @@ class Warehouse(db.Model):
     __tablename__ = "warehouses"
     id = db.Column(db.Integer, primary_key=True)
     branch_id = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
-    name_ar = db.Column(db.String(255), nullable=False)
-    name_en = db.Column(db.String(255), nullable=False)
+    name_ar = db.Column(db.String(255), nullable=False, unique=True)
+    name_en = db.Column(db.String(255), nullable=False, unique=True)
     address_ar = db.Column(db.String(500), nullable=False)
     address_en = db.Column(db.String(500), nullable=False)
 
@@ -50,8 +50,8 @@ class Category(db.Model):
 class FixedAsset(db.Model):
     __tablename__ = "fixed_assets"
     id = db.Column(db.Integer, primary_key=True)
-    name_ar = db.Column(db.String(255), nullable=False)
-    name_en = db.Column(db.String(255), nullable=False)
+    name_ar = db.Column(db.String(255), nullable=False, unique=True)
+    name_en = db.Column(db.String(255), nullable=False, unique=True)
     quantity = db.Column(db.Integer, default=0, nullable=False)
     product_code = db.Column(db.String(100), unique=True, nullable=True)  # used for barcode
     category_id = db.Column(db.Integer, db.ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False)

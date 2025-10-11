@@ -1,7 +1,7 @@
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from flask import Blueprint, request, jsonify
-from flask_restx import Resource
+from flask_restx import Resource, fields
 from marshmallow import ValidationError
 from .. import db
 from ..models import FixedAsset, Category
@@ -19,6 +19,53 @@ asset_schema = FixedAssetSchema()
 assets_schema = FixedAssetSchema(many=True)
 category_schema = CategorySchema()
 categories_schema = CategorySchema(many=True)
+
+# Define the models outside the class first
+bulk_summary_model = api.model('BulkSummary', {
+    'total_processed': fields.Integer(description='Total number of assets processed'),
+    'successfully_added': fields.Integer(description='Number of assets successfully added'),
+    'rejected': fields.Integer(description='Number of assets rejected'),
+    'success_rate': fields.String(description='Success rate percentage')
+})
+
+rejected_asset_model = api.model('RejectedAsset', {
+    'asset_data': fields.Raw(description='Original asset data that was rejected'),
+    'asset_name': fields.String(description='Asset name (if available)'),
+    'errors': fields.List(fields.String, description='List of error messages')
+})
+
+bulk_create_result_model = api.model('BulkCreateResult', {
+    'summary': fields.Nested(bulk_summary_model),
+    'added_assets': fields.List(fields.Nested(asset_model), description='Successfully added assets'),
+    'rejected_assets': fields.List(fields.Nested(rejected_asset_model), description='Rejected assets with error details')
+})
+
+# Add category bulk models after the existing bulk models
+category_bulk_summary_model = api.model('CategoryBulkSummary', {
+    'total_processed': fields.Integer(description='Total number of categories processed'),
+    'successfully_added': fields.Integer(description='Number of categories successfully added'),
+    'rejected': fields.Integer(description='Number of categories rejected'),
+    'success_rate': fields.String(description='Success rate percentage')
+})
+
+rejected_category_model = api.model('RejectedCategory', {
+    'category_data': fields.Raw(description='Original category data that was rejected'),
+    'category_name': fields.String(description='Category name (if available)'),
+    'errors': fields.List(fields.String, description='List of error messages')
+})
+
+category_bulk_create_result_model = api.model('CategoryBulkCreateResult', {
+    'summary': fields.Nested(category_bulk_summary_model),
+    'added_categories': fields.List(fields.Nested(category_model), description='Successfully added categories'),
+    'rejected_categories': fields.List(fields.Nested(rejected_category_model), description='Rejected categories with error details')
+})
+
+# Add bulk update models after the existing bulk models
+bulk_update_result_model = api.model('BulkUpdateResult', {
+    'summary': fields.Nested(bulk_summary_model),
+    'updated_assets': fields.List(fields.Nested(asset_model), description='Successfully updated assets'),
+    'rejected_assets': fields.List(fields.Nested(rejected_asset_model), description='Rejected assets with error details')
+})
 
 @categories_ns.route("/")
 class CategoryList(Resource):
@@ -457,3 +504,692 @@ class AssetSearch(Resource):
         except Exception as e:
             print(f"Search error: {str(e)}")
             return create_error_response(f"Search error: {str(e)}", 500)
+
+@assets_ns.route("/bulk")
+class AssetBulkCreate(Resource):
+    @assets_ns.doc('bulk_create_assets', security='Bearer Auth')
+    @assets_ns.expect([asset_input_model], description='List of assets to create')
+    @assets_ns.response(200, 'Bulk operation completed', bulk_create_result_model)
+    @assets_ns.response(400, 'Invalid input data', error_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @jwt_required()
+    def post(self):
+        """Bulk create multiple assets with detailed error reporting
+        
+        First validates all assets, then adds only the valid ones to the database.
+        
+        Returns a comprehensive report including:
+        - Summary statistics (total, added, rejected, success rate)
+        - List of successfully added assets
+        - List of rejected assets with detailed error information
+        """
+        error = check_permission("can_edit_asset")
+        if error:
+            return error
+
+        try:
+            # Get the request data
+            request_data = request.get_json()
+            
+            # Validate that we received a list
+            if not isinstance(request_data, list):
+                return create_error_response("Request body must be a list of assets", 400)
+            
+            if not request_data:
+                return create_error_response("Asset list cannot be empty", 400)
+            
+            # Initialize lists for validation phase
+            total_processed = len(request_data)
+            valid_assets = []
+            rejected_assets = []
+            
+            # Phase 1: Validate all assets without committing to database
+            for index, asset_data in enumerate(request_data):
+                # Get asset name for reporting
+                asset_name = (
+                    asset_data.get('name_ar') or 
+                    asset_data.get('name_en') or 
+                    f"Asset #{index + 1}"
+                )
+                
+                try:
+                    # Validate the asset data using schema
+                    validated_data = asset_schema.load(asset_data)
+                    
+                    # Check for duplicate product_code in current batch
+                    if validated_data.get('product_code'):
+                        existing_in_batch = any(
+                            asset.get('product_code') == validated_data['product_code'] 
+                            for asset in valid_assets
+                        )
+                        if existing_in_batch:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Product code '{validated_data['product_code']}' is duplicated in this batch"]
+                            })
+                            continue
+                    
+                    # Check for duplicate names in current batch
+                    name_ar_duplicate = any(
+                        asset.get('name_ar') == validated_data['name_ar'] 
+                        for asset in valid_assets
+                    )
+                    name_en_duplicate = any(
+                        asset.get('name_en') == validated_data['name_en'] 
+                        for asset in valid_assets
+                    )
+                    
+                    if name_ar_duplicate:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"Arabic name '{validated_data['name_ar']}' is duplicated in this batch"]
+                        })
+                        continue
+                    
+                    if name_en_duplicate:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"English name '{validated_data['name_en']}' is duplicated in this batch"]
+                        })
+                        continue
+                    
+                    # Check if category exists in database
+                    if not db.session.get(Category, validated_data['category_id']):
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"Invalid category ID '{validated_data['category_id']}' - category does not exist"]
+                        })
+                        continue
+                    
+                    # Check for existing records in database
+                    existing_product_code = None
+                    if validated_data.get('product_code'):
+                        existing_product_code = FixedAsset.query.filter_by(product_code=validated_data['product_code']).first()
+                    
+                    existing_name_ar = FixedAsset.query.filter_by(name_ar=validated_data['name_ar']).first()
+                    existing_name_en = FixedAsset.query.filter_by(name_en=validated_data['name_en']).first()
+                    
+                    if existing_product_code:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"Product code '{validated_data['product_code']}' already exists in database"]
+                        })
+                        continue
+                    
+                    if existing_name_ar:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"Arabic name '{validated_data['name_ar']}' already exists in database"]
+                        })
+                        continue
+                    
+                    if existing_name_en:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"English name '{validated_data['name_en']}' already exists in database"]
+                        })
+                        continue
+                    
+                    # If we get here, the asset is valid
+                    valid_assets.append({
+                        'data': validated_data,
+                        'original': asset_data,
+                        'name': asset_name
+                    })
+                    
+                except ValidationError as ve:
+                    # Schema validation error
+                    error_messages = []
+                    for field, messages in ve.messages.items():
+                        if isinstance(messages, list):
+                            error_messages.extend([f"{field}: {msg}" for msg in messages])
+                        else:
+                            error_messages.append(f"{field}: {messages}")
+                    
+                    rejected_assets.append({
+                        'asset_data': asset_data,
+                        'asset_name': asset_name,
+                        'errors': error_messages
+                    })
+                
+                except Exception as e:
+                    rejected_assets.append({
+                        'asset_data': asset_data,
+                        'asset_name': asset_name,
+                        'errors': [f"Validation error: {str(e)}"]
+                    })
+            
+            # Phase 2: Add all valid assets to database
+            successfully_added = []
+            if valid_assets:
+                try:
+                    for asset_info in valid_assets:
+                        new_asset = FixedAsset(**asset_info['data'])
+                        db.session.add(new_asset)
+                    
+                    # Commit all at once
+                    db.session.commit()
+                    
+                    # Refresh objects to get IDs and relationships
+                    for asset_info in valid_assets:
+                        # Find the corresponding committed asset
+                        committed_asset = FixedAsset.query.filter_by(
+                            name_ar=asset_info['data']['name_ar'],
+                            name_en=asset_info['data']['name_en']
+                        ).first()
+                        if committed_asset:
+                            successfully_added.append(committed_asset)
+                
+                except Exception as e:
+                    db.session.rollback()
+                    # If database commit fails, move all valid assets to rejected
+                    for asset_info in valid_assets:
+                        rejected_assets.append({
+                            'asset_data': asset_info['original'],
+                            'asset_name': asset_info['name'],
+                            'errors': [f"Database error during commit: {str(e)}"]
+                        })
+                    successfully_added = []
+            
+            # Calculate statistics
+            added_count = len(successfully_added)
+            rejected_count = len(rejected_assets)
+            success_rate = f"{(added_count / total_processed * 100):.1f}%" if total_processed > 0 else "0%"
+            
+            # Prepare response
+            result = {
+                'summary': {
+                    'total_processed': total_processed,
+                    'successfully_added': added_count,
+                    'rejected': rejected_count,
+                    'success_rate': success_rate
+                },
+                'added_assets': assets_schema.dump(successfully_added),
+                'rejected_assets': rejected_assets
+            }
+            
+            return result, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            return create_error_response(f"Bulk operation failed: {str(e)}", 500)
+
+@categories_ns.route("/bulk")
+class CategoryBulkCreate(Resource):
+    @categories_ns.doc('bulk_create_categories', security='Bearer Auth')
+    @categories_ns.expect([category_input_model], description='List of categories to create')
+    @categories_ns.response(200, 'Bulk operation completed', category_bulk_create_result_model)
+    @categories_ns.response(400, 'Invalid input data', error_model)
+    @categories_ns.response(401, 'Unauthorized', error_model)
+    @categories_ns.response(403, 'Forbidden', error_model)
+    # @jwt_required()
+    def post(self):
+        """Bulk create multiple categories with detailed error reporting
+        
+        First validates all categories, then adds only the valid ones to the database.
+        
+        Returns a comprehensive report including:
+        - Summary statistics (total, added, rejected, success rate)
+        - List of successfully added categories
+        - List of rejected categories with detailed error information
+        """
+        # error = check_permission("can_edit_asset")
+        # if error:
+        #     return error
+
+        try:
+            # Get the request data
+            request_data = request.get_json()
+            
+            # Validate that we received a list
+            if not isinstance(request_data, list):
+                return create_error_response("Request body must be a list of categories", 400)
+            
+            if not request_data:
+                return create_error_response("Category list cannot be empty", 400)
+            
+            # Initialize lists for validation phase
+            total_processed = len(request_data)
+            valid_categories = []
+            rejected_categories = []
+            
+            # Phase 1: Validate all categories without committing to database
+            for index, category_data in enumerate(request_data):
+                # Get category name for reporting
+                category_name = (
+                    category_data.get('category') or 
+                    f"Category #{index + 1}"
+                )
+                
+                try:
+                    # Validate the category data using schema
+                    validated_data = category_schema.load(category_data)
+                    
+                    # Check for duplicate category in current batch
+                    # Fix: Access the nested data structure correctly
+                    existing_in_batch = any(
+                        cat['data'].get('category') == validated_data['category'] 
+                        for cat in valid_categories
+                    )
+                    if existing_in_batch:
+                        rejected_categories.append({
+                            'category_data': category_data,
+                            'category_name': category_name,
+                            'errors': [f"Category '{validated_data['category']}' is duplicated in this batch"]
+                        })
+                        continue
+                    
+                    # Check for existing category in database (only category name matters for uniqueness)
+                    existing_category = Category.query.filter_by(category=validated_data['category']).first()
+                    if existing_category:
+                        rejected_categories.append({
+                            'category_data': category_data,
+                            'category_name': category_name,
+                            'errors': [f"Category '{validated_data['category']}' already exists in database"]
+                        })
+                        continue
+                    
+                    # If we get here, the category is valid
+                    valid_categories.append({
+                        'data': validated_data,
+                        'original': category_data,
+                        'name': category_name
+                    })
+                    
+                except ValidationError as ve:
+                    # Schema validation error
+                    error_messages = []
+                    for field, messages in ve.messages.items():
+                        if isinstance(messages, list):
+                            error_messages.extend([f"{field}: {msg}" for msg in messages])
+                        else:
+                            error_messages.append(f"{field}: {messages}")
+                    
+                    rejected_categories.append({
+                        'category_data': category_data,
+                        'category_name': category_name,
+                        'errors': error_messages
+                    })
+                
+                except Exception as e:
+                    rejected_categories.append({
+                        'category_data': category_data,
+                        'category_name': category_name,
+                        'errors': [f"Validation error: {str(e)}"]
+                    })
+            
+            # Phase 2: Add all valid categories to database
+            successfully_added = []
+            if valid_categories:
+                try:
+                    for category_info in valid_categories:
+                        new_category = Category(**category_info['data'])
+                        db.session.add(new_category)
+                    
+                    # Commit all at once
+                    db.session.commit()
+                    
+                    # Refresh objects to get IDs
+                    for category_info in valid_categories:
+                        # Find the corresponding committed category
+                        committed_category = Category.query.filter_by(
+                            category=category_info['data']['category']
+                        ).first()
+                        if committed_category:
+                            successfully_added.append(committed_category)
+                
+                except IntegrityError as ie:
+                    db.session.rollback()
+                    error_str = str(ie.orig).lower()
+                    
+                    # Handle specific database constraint violations
+                    if "unique constraint failed: categories.category" in error_str:
+                        # If we get here, it means our validation missed something
+                        # Move all categories to rejected with specific error
+                        for category_info in valid_categories:
+                            rejected_categories.append({
+                                'category_data': category_info['original'],
+                                'category_name': category_info['name'],
+                                'errors': [f"Category '{category_info['data']['category']}' already exists in database"]
+                            })
+                    else:
+                        # Other integrity errors
+                        for category_info in valid_categories:
+                            rejected_categories.append({
+                                'category_data': category_info['original'],
+                                'category_name': category_info['name'],
+                                'errors': [f"Database constraint violation: {str(ie.orig)}"]
+                            })
+                    successfully_added = []
+                
+                except Exception as e:
+                    db.session.rollback()
+                    # If database commit fails, move all valid categories to rejected
+                    for category_info in valid_categories:
+                        rejected_categories.append({
+                            'category_data': category_info['original'],
+                            'category_name': category_info['name'],
+                            'errors': [f"Database error during commit: {str(e)}"]
+                        })
+                    successfully_added = []
+            
+            # Calculate statistics
+            added_count = len(successfully_added)
+            rejected_count = len(rejected_categories)
+            success_rate = f"{(added_count / total_processed * 100):.1f}%" if total_processed > 0 else "0%"
+            
+            # Prepare response
+            result = {
+                'summary': {
+                    'total_processed': total_processed,
+                    'successfully_added': added_count,
+                    'rejected': rejected_count,
+                    'success_rate': success_rate
+                },
+                'added_categories': categories_schema.dump(successfully_added),
+                'rejected_categories': rejected_categories
+            }
+            
+            return result, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            return create_error_response(f"Bulk operation failed: {str(e)}", 500)
+
+@assets_ns.route("/bulk-update")
+class AssetBulkUpdate(Resource):
+    @assets_ns.doc('bulk_update_assets', security='Bearer Auth')
+    @assets_ns.expect([api.model('AssetUpdateInput', {
+        'id': fields.Integer(required=True, description='Asset ID to update'),
+        'name_ar': fields.String(description='Arabic name'),
+        'name_en': fields.String(description='English name'),
+        'quantity': fields.Integer(description='Quantity'),
+        'product_code': fields.String(description='Product code'),
+        'category_id': fields.Integer(description='Category ID'),
+        'is_active': fields.Boolean(description='Active status')
+    })], description='List of assets to update')
+    @assets_ns.response(200, 'Bulk update completed', bulk_update_result_model)
+    @assets_ns.response(400, 'Invalid input data', error_model)
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @jwt_required()
+    def put(self):
+        """Bulk update multiple assets with detailed error reporting
+        
+        First validates all asset updates, then applies only the valid ones to the database.
+        
+        Returns a comprehensive report including:
+        - Summary statistics (total, updated, rejected, success rate)
+        - List of successfully updated assets
+        - List of rejected assets with detailed error information
+        """
+        error = check_permission("can_edit_asset")
+        if error:
+            return error
+
+        try:
+            # Get the request data
+            request_data = request.get_json()
+            
+            # Validate that we received a list
+            if not isinstance(request_data, list):
+                return create_error_response("Request body must be a list of asset updates", 400)
+            
+            if not request_data:
+                return create_error_response("Asset update list cannot be empty", 400)
+            
+            # Initialize lists for validation phase
+            total_processed = len(request_data)
+            valid_updates = []
+            rejected_assets = []
+            
+            # Phase 1: Validate all asset updates without committing to database
+            for index, asset_data in enumerate(request_data):
+                # Get asset identifier for reporting
+                asset_id = asset_data.get('id')
+                asset_name = (
+                    asset_data.get('name_ar') or 
+                    asset_data.get('name_en') or 
+                    f"Asset ID {asset_id}" if asset_id else f"Asset #{index + 1}"
+                )
+                
+                try:
+                    # Check if asset ID is provided
+                    if not asset_id:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': ['Asset ID is required for update operation']
+                        })
+                        continue
+                    
+                    # Check if asset exists in database
+                    existing_asset = db.session.get(FixedAsset, asset_id)
+                    if not existing_asset:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f'Asset with ID {asset_id} not found in database']
+                        })
+                        continue
+                    
+                    # Validate the asset data using schema (partial=True for updates)
+                    update_data = {k: v for k, v in asset_data.items() if k != 'id'}
+                    validated_data = asset_schema.load(update_data, partial=True)
+                    
+                    # Check for duplicate product_code in current batch (excluding current asset)
+                    if validated_data.get('product_code'):
+                        existing_in_batch = any(
+                            update['validated_data'].get('product_code') == validated_data['product_code'] 
+                            and update['asset_id'] != asset_id
+                            for update in valid_updates
+                        )
+                        if existing_in_batch:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Product code '{validated_data['product_code']}' is duplicated in this batch"]
+                            })
+                            continue
+                    
+                    # Check for duplicate names in current batch (excluding current asset)
+                    if validated_data.get('name_ar'):
+                        name_ar_duplicate = any(
+                            update['validated_data'].get('name_ar') == validated_data['name_ar'] 
+                            and update['asset_id'] != asset_id
+                            for update in valid_updates
+                        )
+                        if name_ar_duplicate:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Arabic name '{validated_data['name_ar']}' is duplicated in this batch"]
+                            })
+                            continue
+                    
+                    if validated_data.get('name_en'):
+                        name_en_duplicate = any(
+                            update['validated_data'].get('name_en') == validated_data['name_en'] 
+                            and update['asset_id'] != asset_id
+                            for update in valid_updates
+                        )
+                        if name_en_duplicate:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"English name '{validated_data['name_en']}' is duplicated in this batch"]
+                            })
+                            continue
+                    
+                    # Check if category exists in database (if category_id is being updated)
+                    if validated_data.get('category_id'):
+                        if not db.session.get(Category, validated_data['category_id']):
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Invalid category ID '{validated_data['category_id']}' - category does not exist"]
+                            })
+                            continue
+                    
+                    # Check for existing records in database (excluding current asset)
+                    if validated_data.get('product_code'):
+                        existing_product_code = FixedAsset.query.filter(
+                            FixedAsset.product_code == validated_data['product_code'],
+                            FixedAsset.id != asset_id
+                        ).first()
+                        if existing_product_code:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Product code '{validated_data['product_code']}' already exists in database (used by asset ID {existing_product_code.id})"]
+                            })
+                            continue
+                    
+                    if validated_data.get('name_ar'):
+                        existing_name_ar = FixedAsset.query.filter(
+                            FixedAsset.name_ar == validated_data['name_ar'],
+                            FixedAsset.id != asset_id
+                        ).first()
+                        if existing_name_ar:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Arabic name '{validated_data['name_ar']}' already exists in database (used by asset ID {existing_name_ar.id})"]
+                            })
+                            continue
+                    
+                    if validated_data.get('name_en'):
+                        existing_name_en = FixedAsset.query.filter(
+                            FixedAsset.name_en == validated_data['name_en'],
+                            FixedAsset.id != asset_id
+                        ).first()
+                        if existing_name_en:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"English name '{validated_data['name_en']}' already exists in database (used by asset ID {existing_name_en.id})"]
+                            })
+                            continue
+                    
+                    # If we get here, the update is valid
+                    valid_updates.append({
+                        'asset_id': asset_id,
+                        'asset': existing_asset,
+                        'validated_data': validated_data,
+                        'original': asset_data,
+                        'name': asset_name
+                    })
+                    
+                except ValidationError as ve:
+                    # Schema validation error
+                    error_messages = []
+                    for field, messages in ve.messages.items():
+                        if isinstance(messages, list):
+                            error_messages.extend([f"{field}: {msg}" for msg in messages])
+                        else:
+                            error_messages.append(f"{field}: {messages}")
+                    
+                    rejected_assets.append({
+                        'asset_data': asset_data,
+                        'asset_name': asset_name,
+                        'errors': error_messages
+                    })
+                
+                except Exception as e:
+                    rejected_assets.append({
+                        'asset_data': asset_data,
+                        'asset_name': asset_name,
+                        'errors': [f"Validation error: {str(e)}"]
+                    })
+            
+            # Phase 2: Apply all valid updates to database
+            successfully_updated = []
+            if valid_updates:
+                try:
+                    for update_info in valid_updates:
+                        asset = update_info['asset']
+                        validated_data = update_info['validated_data']
+                        
+                        # Apply updates to the asset
+                        for key, value in validated_data.items():
+                            setattr(asset, key, value)
+                    
+                    # Commit all changes at once
+                    db.session.commit()
+                    
+                    # Add updated assets to success list
+                    for update_info in valid_updates:
+                        successfully_updated.append(update_info['asset'])
+                
+                except IntegrityError as ie:
+                    db.session.rollback()
+                    error_str = str(ie.orig).lower()
+                    
+                    # Handle specific database constraint violations
+                    if "unique constraint failed" in error_str:
+                        for update_info in valid_updates:
+                            if "product_code" in error_str:
+                                error_msg = f"Product code '{update_info['validated_data'].get('product_code', 'N/A')}' already exists in database"
+                            elif "name_ar" in error_str:
+                                error_msg = f"Arabic name '{update_info['validated_data'].get('name_ar', 'N/A')}' already exists in database"
+                            elif "name_en" in error_str:
+                                error_msg = f"English name '{update_info['validated_data'].get('name_en', 'N/A')}' already exists in database"
+                            else:
+                                error_msg = "Duplicate record - asset with this information already exists"
+                            
+                            rejected_assets.append({
+                                'asset_data': update_info['original'],
+                                'asset_name': update_info['name'],
+                                'errors': [error_msg]
+                            })
+                    else:
+                        # Other integrity errors
+                        for update_info in valid_updates:
+                            rejected_assets.append({
+                                'asset_data': update_info['original'],
+                                'asset_name': update_info['name'],
+                                'errors': [f"Database constraint violation: {str(ie.orig)}"]
+                            })
+                    successfully_updated = []
+                
+                except Exception as e:
+                    db.session.rollback()
+                    # If database commit fails, move all valid updates to rejected
+                    for update_info in valid_updates:
+                        rejected_assets.append({
+                            'asset_data': update_info['original'],
+                            'asset_name': update_info['name'],
+                            'errors': [f"Database error during commit: {str(e)}"]
+                        })
+                    successfully_updated = []
+            
+            # Calculate statistics
+            updated_count = len(successfully_updated)
+            rejected_count = len(rejected_assets)
+            success_rate = f"{(updated_count / total_processed * 100):.1f}%" if total_processed > 0 else "0%"
+            
+            # Prepare response
+            result = {
+                'summary': {
+                    'total_processed': total_processed,
+                    'successfully_added': updated_count,  # Using 'successfully_added' to match the model
+                    'rejected': rejected_count,
+                    'success_rate': success_rate
+                },
+                'updated_assets': assets_schema.dump(successfully_updated),
+                'rejected_assets': rejected_assets
+            }
+            
+            return result, 200
+            
+        except Exception as e:
+            db.session.rollback()
+            return create_error_response(f"Bulk update operation failed: {str(e)}", 500)

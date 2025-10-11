@@ -216,7 +216,7 @@ class Login(Resource):
                 return create_error_response("Invalid email or password", 401)
 
             access_token = create_access_token(
-                identity=str(user.id), expires_delta=datetime.timedelta(hours=5)
+                identity=str(user.id), expires_delta=datetime.timedelta(hours=1)
             )
             return {"access_token": access_token, "user": user_schema.dump(user)}
         except OperationalError as e:
