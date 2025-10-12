@@ -1,6 +1,6 @@
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from flask_restx import Resource, fields
 from marshmallow import ValidationError
 from .. import db
@@ -13,6 +13,11 @@ from ..swagger_models import (
     asset_model, asset_input_model, category_model, category_input_model,
     pagination_model, error_model, success_model, barcode_model, asset_search_response_model
 )
+import pandas as pd
+from io import BytesIO
+import openpyxl
+import openpyxl.styles
+from datetime import datetime
 
 bp = Blueprint("assets", __name__, url_prefix="/assets")
 asset_schema = FixedAssetSchema()
@@ -245,22 +250,35 @@ class AssetList(Resource):
     @assets_ns.param('page', 'Page number', type=int, default=1)
     @assets_ns.param('per_page', 'Items per page', type=int, default=10)
     @assets_ns.param('category_id', 'Filter assets by category ID', type=int)
+    @assets_ns.param('subcategory', 'Filter assets by subcategory name', type=str)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
-    @jwt_required()
+    # @jwt_required()
     def get(self):
-        """Get all fixed assets with pagination and optional category filtering"""
-        error = check_permission("can_read_asset")
-        if error:
-            return error
+        """Get all fixed assets with pagination and optional category/subcategory filtering
+        
+        - category_id: Filter by specific category ID
+        - subcategory: Filter by subcategory name (case-insensitive partial match)
+        """
+        # error = check_permission("can_read_asset")
+        # if error:
+        #     return error
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
         category_id = request.args.get("category_id", type=int)
+        subcategory = request.args.get("subcategory", "").strip()
 
         query = FixedAsset.query
+        
+        # Filter by category_id if provided
         if category_id:
             query = query.filter_by(category_id=category_id)
+        
+        # Filter by subcategory if provided
+        if subcategory:
+            # Join with Category table to filter by subcategory name
+            query = query.join(Category).filter(Category.subcategory.ilike(f"%{subcategory}%"))
 
         # Order by ID descending for consistent ordering
         query = query.order_by(FixedAsset.id.desc())
@@ -1193,3 +1211,194 @@ class AssetBulkUpdate(Resource):
         except Exception as e:
             db.session.rollback()
             return create_error_response(f"Bulk update operation failed: {str(e)}", 500)
+
+@assets_ns.route("/export-excel")
+class AssetExcelExport(Resource):
+    @assets_ns.doc('export_assets_excel', security='Bearer Auth')
+    @assets_ns.param('category_id', 'Filter assets by category ID', type=int)
+    @assets_ns.param('subcategory', 'Filter assets by subcategory name', type=str)
+    @assets_ns.response(200, 'Successfully generated Excel export')
+    @assets_ns.response(401, 'Unauthorized', error_model)
+    @assets_ns.response(403, 'Forbidden', error_model)
+    @assets_ns.response(500, 'Internal Server Error', error_model)
+    @jwt_required()
+    def get(self):
+        """Export all assets to Excel file with optional category/subcategory filtering
+        
+        Returns Excel file containing:
+        - Filter information at the top (if filters are applied)
+        - Complete list of assets with all details
+        
+        Optional filters:
+        - category_id: Filter by specific category ID
+        - subcategory: Filter by subcategory name (case-insensitive partial match)
+        """
+        error = check_permission("can_read_asset")
+        if error:
+            return error
+
+        # Get filter parameters
+        category_id = request.args.get("category_id", type=int)
+        subcategory = request.args.get("subcategory", "").strip()
+
+        try:
+            # Build query without relationship loading since it doesn't exist
+            query = FixedAsset.query
+            
+            # Track applied filters
+            applied_filters = {}
+            
+            # Apply filters if provided
+            if category_id:
+                query = query.filter(FixedAsset.category_id == category_id)
+                applied_filters['Category ID'] = category_id
+            
+            if subcategory:
+                query = query.join(Category).filter(Category.subcategory.ilike(f"%{subcategory}%"))
+                applied_filters['Subcategory'] = subcategory
+            
+            # Order by ID for consistent output
+            query = query.order_by(FixedAsset.id.asc())
+            
+            # Execute query
+            assets = query.all()
+            
+            # Create Excel file
+            return self._create_excel_export(assets, applied_filters)
+            
+        except Exception as e:
+            print(f"Excel export error: {str(e)}")
+            return create_error_response(f"Excel export failed: {str(e)}", 500)
+
+    def _create_excel_export(self, assets, applied_filters):
+        """Create Excel file with asset data and filter information"""
+        try:
+            # Create BytesIO buffer
+            output = BytesIO()
+            
+            # Create workbook directly
+            workbook = openpyxl.Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Assets Export"
+            
+            # Set column widths - removed created_at and updated_at columns
+            worksheet.column_dimensions['A'].width = 10   # ID
+            worksheet.column_dimensions['B'].width = 25   # Name AR
+            worksheet.column_dimensions['C'].width = 25   # Name EN
+            worksheet.column_dimensions['D'].width = 15   # Product Code
+            worksheet.column_dimensions['E'].width = 12   # Quantity
+            worksheet.column_dimensions['F'].width = 20   # Category
+            worksheet.column_dimensions['G'].width = 20   # Subcategory
+            worksheet.column_dimensions['H'].width = 12   # Is Active
+            
+            current_row = 1
+            
+            # Add title
+            worksheet.merge_cells(f'A{current_row}:H{current_row}')  # Changed from J to H
+            title_cell = worksheet[f'A{current_row}']
+            title_cell.value = "Assets Export"
+            title_cell.font = openpyxl.styles.Font(size=16, bold=True)
+            title_cell.alignment = openpyxl.styles.Alignment(horizontal='center')
+            current_row += 2
+            
+            # Add generation info
+            worksheet[f'A{current_row}'] = "Generated At:"
+            worksheet[f'B{current_row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            current_row += 1
+            
+            # Add filters section (only if filters are applied)
+            if applied_filters:
+                worksheet[f'A{current_row}'] = "Applied Filters:"
+                worksheet[f'A{current_row}'].font = openpyxl.styles.Font(bold=True)
+                current_row += 1
+                
+                for filter_name, filter_value in applied_filters.items():
+                    worksheet[f'A{current_row}'] = f"{filter_name}:"
+                    worksheet[f'B{current_row}'] = filter_value
+                    current_row += 1
+                
+                current_row += 1  # Extra spacing
+            
+            # Add total count
+            worksheet[f'A{current_row}'] = "Total Assets:"
+            worksheet[f'B{current_row}'] = len(assets)
+            worksheet[f'A{current_row}'].font = openpyxl.styles.Font(bold=True)
+            current_row += 2
+            
+            # Add data table headers - removed created_at and updated_at
+            headers = [
+                'ID', 'Name (Arabic)', 'Name (English)', 'Product Code', 
+                'Quantity', 'Category', 'Subcategory', 'Active'
+            ]
+            
+            header_row = current_row
+            for col_num, header in enumerate(headers, 1):
+                cell = worksheet.cell(row=header_row, column=col_num)
+                cell.value = header
+                cell.font = openpyxl.styles.Font(bold=True)
+                cell.fill = openpyxl.styles.PatternFill(
+                    start_color="CCCCCC", 
+                    end_color="CCCCCC", 
+                    fill_type="solid"
+                )
+            
+            current_row += 1
+            
+            # Add asset data
+            for asset in assets:
+                # Get category info by querying the Category table directly
+                category_name = ''
+                subcategory_name = ''
+                
+                if asset.category_id:
+                    category = db.session.get(Category, asset.category_id)
+                    if category:
+                        category_name = category.category or ''
+                        subcategory_name = category.subcategory or ''
+                
+                # Removed created_at and updated_at from row_data
+                row_data = [
+                    asset.id,
+                    asset.name_ar or '',
+                    asset.name_en or '',
+                    asset.product_code or '',
+                    asset.quantity or 0,
+                    category_name,
+                    subcategory_name,
+                    'Yes' if asset.is_active else 'No'
+                ]
+                
+                for col_num, value in enumerate(row_data, 1):
+                    cell = worksheet.cell(row=current_row, column=col_num)
+                    cell.value = value
+                
+                current_row += 1
+            
+            # If no assets found, add a message
+            if not assets:
+                worksheet[f'A{current_row}'] = "No assets found for the specified filters."
+                worksheet[f'A{current_row}'].font = openpyxl.styles.Font(italic=True, color="FF0000")
+            
+            # Save workbook to BytesIO
+            workbook.save(output)
+            output.seek(0)
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if applied_filters:
+                filter_suffix = "_filtered"
+            else:
+                filter_suffix = "_all"
+            filename = f"assets_export{filter_suffix}_{timestamp}.xlsx"
+            
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            
+        except Exception as e:
+            print(f"Error creating Excel file: {str(e)}")
+            return create_error_response(f"Failed to create Excel file: {str(e)}", 500)
+

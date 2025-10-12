@@ -28,6 +28,13 @@ from ..swagger_models import (
 )
 from werkzeug.datastructures import FileStorage
 from sqlalchemy.orm import noload
+import pandas as pd
+from io import BytesIO
+from datetime import datetime, date
+from flask import send_file
+import openpyxl
+import openpyxl.styles
+
 bp = Blueprint("transactions", __name__, url_prefix="/transactions")
 
 def authenticate_for_download():
@@ -1306,3 +1313,448 @@ class AssetAverage(Resource):
             return create_error_response("Internal server error", 500)
 
 
+
+@transactions_ns.route("/generate-excel-report")
+class GenerateExcelReport(Resource):
+    @transactions_ns.doc('generate_excel_report', security='Bearer Auth')
+    @transactions_ns.param('date', 'Filter by exact date (YYYY-MM-DD) - REQUIRED', type=str, required=True)
+    @transactions_ns.param('category', 'Filter by category name', type=str)
+    @transactions_ns.param('subcategory', 'Filter by subcategory name', type=str)
+    @transactions_ns.param('branch_id', 'Filter by branch ID', type=int)
+    @transactions_ns.param('warehouse_id', 'Filter by warehouse ID', type=int)
+    @transactions_ns.response(200, 'Successfully generated Excel report')
+    @transactions_ns.response(400, 'Bad Request', error_model)
+    @transactions_ns.response(401, 'Unauthorized', error_model)
+    @transactions_ns.response(403, 'Forbidden', error_model)
+    @transactions_ns.response(500, 'Internal Server Error', error_model)
+    @jwt_required()
+    def get(self):
+        """Generate comprehensive transaction report as Excel file
+        
+        Returns Excel file with:
+        - Filter information at the top
+        - Asset-wise summary including:
+          * Asset name and details
+          * Total quantity IN and OUT
+          * Total amount IN and OUT  
+          * Total cost (quantity × amount) IN and OUT
+          * Overall totals
+        
+        REQUIRED: date parameter must be provided
+        Optional filters can be combined:
+        - Category: ?category=Electronics
+        - Subcategory: ?subcategory=Laptops (can be used with or without category)
+        - Branch/Warehouse: ?branch_id=1 or ?warehouse_id=1
+        """
+        error = check_permission("can_make_report")
+        if error:
+            return error
+
+        # Get filter parameters - date is REQUIRED
+        exact_date = request.args.get("date")
+        if not exact_date:
+            return create_error_response("Date parameter is required. Use format: YYYY-MM-DD", 400, "date")
+
+        category_name = request.args.get("category")
+        subcategory_name = request.args.get("subcategory")
+        branch_id = request.args.get("branch_id", type=int)
+        warehouse_id = request.args.get("warehouse_id", type=int)
+
+        try:
+            # Step 1: Parse and validate the required date
+            try:
+                date_obj = datetime.strptime(exact_date, "%Y-%m-%d").date()
+            except ValueError:
+                return create_error_response("Invalid date format. Use YYYY-MM-DD", 400, "date")
+
+            # Step 2: Start with transactions filtered by the specific date
+            print(f"Filtering transactions for date: {date_obj}")
+            transaction_query = db.session.query(Transaction).filter(Transaction.date == date_obj)
+            
+            # Step 3: Apply warehouse filter first (most specific)
+            if warehouse_id:
+                print(f"Filtering by warehouse_id: {warehouse_id}")
+                transaction_query = transaction_query.filter(Transaction.warehouse_id == warehouse_id)
+            
+            # Step 4: If no warehouse filter, but branch filter exists, apply it
+            elif branch_id:
+                print(f"Filtering by branch_id: {branch_id}")
+                transaction_query = transaction_query.join(Warehouse).filter(Warehouse.branch_id == branch_id)
+            
+            # Step 5: Get the filtered transaction IDs (this limits our scope early)
+            filtered_transaction_ids = [t.id for t in transaction_query.all()]
+            
+            if not filtered_transaction_ids:
+                print("No transactions found for the given filters")
+                # Create empty Excel file with filter info only
+                return self._create_empty_excel_report(exact_date, category_name, subcategory_name, branch_id, warehouse_id)
+
+            print(f"Found {len(filtered_transaction_ids)} transactions to analyze")
+
+            # Step 6: Build optimized query using the filtered transaction IDs
+            from sqlalchemy import func, case
+            query = db.session.query(
+                FixedAsset.id.label('asset_id'),
+                FixedAsset.name_ar.label('asset_name_ar'),
+                FixedAsset.name_en.label('asset_name_en'),
+                FixedAsset.product_code.label('product_code'),
+                Category.category.label('category'),
+                Category.subcategory.label('subcategory'),
+                # Sum quantities for IN transactions (transaction_type = True)
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Transaction.transaction_type == True, AssetTransaction.quantity),
+                            else_=0
+                        )
+                    ), 0
+                ).label('total_quantity_in'),
+                # Sum quantities for OUT transactions (transaction_type = False)
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Transaction.transaction_type == False, AssetTransaction.quantity),
+                            else_=0
+                        )
+                    ), 0
+                ).label('total_quantity_out'),
+                # Sum amounts for IN transactions
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Transaction.transaction_type == True, AssetTransaction.amount),
+                            else_=0
+                        )
+                    ), 0
+                ).label('total_amount_in'),
+                # Sum amounts for OUT transactions
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Transaction.transaction_type == False, AssetTransaction.amount),
+                            else_=0
+                        )
+                    ), 0
+                ).label('total_amount_out'),
+                # Sum total costs for IN transactions (quantity × amount)
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Transaction.transaction_type == True, AssetTransaction.quantity * AssetTransaction.amount),
+                            else_=0
+                        )
+                    ), 0
+                ).label('total_cost_in'),
+                # Sum total costs for OUT transactions
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (Transaction.transaction_type == False, AssetTransaction.quantity * AssetTransaction.amount),
+                            else_=0
+                        )
+                    ), 0
+                ).label('total_cost_out')
+            ).select_from(
+                AssetTransaction
+            ).join(
+                Transaction, AssetTransaction.transaction_id == Transaction.id
+            ).join(
+                FixedAsset, AssetTransaction.asset_id == FixedAsset.id
+            ).join(
+                Category, FixedAsset.category_id == Category.id
+            ).filter(
+                # Only include asset transactions from our filtered transactions
+                AssetTransaction.transaction_id.in_(filtered_transaction_ids)
+            )
+
+            # Step 7: Apply category and subcategory filters if provided
+            if category_name:
+                print(f"Filtering by category: {category_name}")
+                query = query.filter(Category.category == category_name)
+            
+            if subcategory_name:
+                print(f"Filtering by subcategory: {subcategory_name}")
+                query = query.filter(Category.subcategory == subcategory_name)
+
+            # Step 8: Group by asset to get asset-level aggregations
+            query = query.group_by(
+                FixedAsset.id,
+                FixedAsset.name_ar,
+                FixedAsset.name_en,
+                FixedAsset.product_code,
+                Category.category,
+                Category.subcategory
+            )
+
+            # Step 9: Execute the optimized query
+            print("Executing final aggregation query...")
+            results = query.all()
+            print(f"Found {len(results)} assets with transactions")
+
+            # Step 10: Process results and create Excel file
+            return self._create_excel_report(
+                results, exact_date, category_name, subcategory_name, 
+                branch_id, warehouse_id, len(filtered_transaction_ids)
+            )
+
+        except Exception as e:
+            print(f"Excel report generation error: {str(e)}")
+            return create_error_response(f"Excel report generation failed: {str(e)}", 500)
+
+    def _create_excel_report(self, results, exact_date, category_name, subcategory_name, branch_id, warehouse_id, total_transactions):
+        """Create Excel file with filter information and data"""
+        try:
+            # Create BytesIO buffer
+            output = BytesIO()
+            
+            # Create workbook directly without pandas ExcelWriter initially
+            workbook = openpyxl.Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Transaction Report"
+            
+            # Set column widths
+            worksheet.column_dimensions['A'].width = 20
+            worksheet.column_dimensions['B'].width = 25
+            worksheet.column_dimensions['C'].width = 25
+            worksheet.column_dimensions['D'].width = 15
+            worksheet.column_dimensions['E'].width = 15
+            worksheet.column_dimensions['F'].width = 15
+            worksheet.column_dimensions['G'].width = 12
+            worksheet.column_dimensions['H'].width = 12
+            worksheet.column_dimensions['I'].width = 15
+            worksheet.column_dimensions['J'].width = 15
+            worksheet.column_dimensions['K'].width = 15
+            worksheet.column_dimensions['L'].width = 15
+            worksheet.column_dimensions['M'].width = 12
+            worksheet.column_dimensions['N'].width = 15
+            worksheet.column_dimensions['O'].width = 15
+            
+            current_row = 1
+            
+            # Add title
+            worksheet.merge_cells(f'A{current_row}:O{current_row}')
+            title_cell = worksheet[f'A{current_row}']
+            title_cell.value = "Transaction Report"
+            title_cell.font = openpyxl.styles.Font(size=16, bold=True)
+            title_cell.alignment = openpyxl.styles.Alignment(horizontal='center')
+            current_row += 2
+            
+            # Add generation info
+            worksheet[f'A{current_row}'] = "Generated At:"
+            worksheet[f'B{current_row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            current_row += 1
+            
+            # Add filters section
+            worksheet[f'A{current_row}'] = "Applied Filters:"
+            worksheet[f'A{current_row}'].font = openpyxl.styles.Font(bold=True)
+            current_row += 1
+            
+            worksheet[f'A{current_row}'] = "Date:"
+            worksheet[f'B{current_row}'] = exact_date
+            current_row += 1
+            
+            if category_name:
+                worksheet[f'A{current_row}'] = "Category:"
+                worksheet[f'B{current_row}'] = category_name
+                current_row += 1
+            
+            if subcategory_name:
+                worksheet[f'A{current_row}'] = "Subcategory:"
+                worksheet[f'B{current_row}'] = subcategory_name
+                current_row += 1
+            
+            if branch_id:
+                worksheet[f'A{current_row}'] = "Branch ID:"
+                worksheet[f'B{current_row}'] = branch_id
+                current_row += 1
+            
+            if warehouse_id:
+                worksheet[f'A{current_row}'] = "Warehouse ID:"
+                worksheet[f'B{current_row}'] = warehouse_id
+                current_row += 1
+            
+            worksheet[f'A{current_row}'] = "Total Transactions:"
+            worksheet[f'B{current_row}'] = total_transactions
+            current_row += 2
+            
+            # Process results into data
+            asset_data = []
+            total_summary = {
+                'total_quantity_in': 0,
+                'total_quantity_out': 0,
+                'total_amount_in': 0,
+                'total_amount_out': 0,
+                'total_cost_in': 0,
+                'total_cost_out': 0
+            }
+            
+            for result in results:
+                row_data = {
+                    'Asset ID': result.asset_id,
+                    'Asset Name (AR)': result.asset_name_ar,
+                    'Asset Name (EN)': result.asset_name_en,
+                    'Product Code': result.product_code,
+                    'Category': result.category,
+                    'Subcategory': result.subcategory,
+                    'Qty IN': int(result.total_quantity_in),
+                    'Qty OUT': int(result.total_quantity_out),
+                    'Amount IN': float(result.total_amount_in),
+                    'Amount OUT': float(result.total_amount_out),
+                    'Cost IN': float(result.total_cost_in),
+                    'Cost OUT': float(result.total_cost_out),
+                    'Net Qty': int(result.total_quantity_in - result.total_quantity_out),
+                    'Net Amount': float(result.total_amount_in - result.total_amount_out),
+                    'Net Cost': float(result.total_cost_in - result.total_cost_out)
+                }
+                
+                asset_data.append(row_data)
+                
+                # Add to totals
+                total_summary['total_quantity_in'] += row_data['Qty IN']
+                total_summary['total_quantity_out'] += row_data['Qty OUT']
+                total_summary['total_amount_in'] += row_data['Amount IN']
+                total_summary['total_amount_out'] += row_data['Amount OUT']
+                total_summary['total_cost_in'] += row_data['Cost IN']
+                total_summary['total_cost_out'] += row_data['Cost OUT']
+            
+            # Add data table
+            if asset_data:
+                # Add headers
+                headers = ['Asset ID', 'Asset Name (AR)', 'Asset Name (EN)', 'Product Code', 'Category', 'Subcategory',
+                          'Qty IN', 'Qty OUT', 'Amount IN', 'Amount OUT', 'Cost IN', 'Cost OUT', 
+                          'Net Qty', 'Net Amount', 'Net Cost']
+                
+                header_row = current_row
+                for col_num, header in enumerate(headers, 1):
+                    cell = worksheet.cell(row=header_row, column=col_num)
+                    cell.value = header
+                    cell.font = openpyxl.styles.Font(bold=True)
+                    cell.fill = openpyxl.styles.PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+                
+                current_row += 1
+                
+                # Add data rows
+                for row_data in asset_data:
+                    for col_num, header in enumerate(headers, 1):
+                        cell = worksheet.cell(row=current_row, column=col_num)
+                        cell.value = row_data[header]
+                    current_row += 1
+                
+                # Add totals row
+                totals_row = current_row
+                worksheet[f'A{totals_row}'] = "TOTALS"
+                worksheet[f'A{totals_row}'].font = openpyxl.styles.Font(bold=True)
+                
+                # Calculate net totals
+                net_quantity = total_summary['total_quantity_in'] - total_summary['total_quantity_out']
+                net_amount = total_summary['total_amount_in'] - total_summary['total_amount_out']
+                net_cost = total_summary['total_cost_in'] - total_summary['total_cost_out']
+                
+                worksheet[f'G{totals_row}'] = total_summary['total_quantity_in']
+                worksheet[f'H{totals_row}'] = total_summary['total_quantity_out']
+                worksheet[f'I{totals_row}'] = total_summary['total_amount_in']
+                worksheet[f'J{totals_row}'] = total_summary['total_amount_out']
+                worksheet[f'K{totals_row}'] = total_summary['total_cost_in']
+                worksheet[f'L{totals_row}'] = total_summary['total_cost_out']
+                worksheet[f'M{totals_row}'] = net_quantity
+                worksheet[f'N{totals_row}'] = net_amount
+                worksheet[f'O{totals_row}'] = net_cost
+                
+                # Style totals row
+                for col in range(1, 16):  # A to O
+                    cell = worksheet.cell(row=totals_row, column=col)
+                    cell.font = openpyxl.styles.Font(bold=True)
+                    cell.fill = openpyxl.styles.PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
+            
+            else:
+                # No data found
+                worksheet[f'A{current_row}'] = "No transactions found for the specified filters."
+                worksheet[f'A{current_row}'].font = openpyxl.styles.Font(italic=True)
+            
+            # Save workbook to BytesIO
+            workbook.save(output)
+            output.seek(0)
+            
+            # Generate filename
+            filename = f"transaction_report_{exact_date.replace('-', '_')}.xlsx"
+            
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            
+        except Exception as e:
+            print(f"Error creating Excel file: {str(e)}")
+            return create_error_response(f"Failed to create Excel file: {str(e)}", 500)
+    
+    def _create_empty_excel_report(self, exact_date, category_name, subcategory_name, branch_id, warehouse_id):
+        """Create empty Excel file when no data is found"""
+        try:
+            output = BytesIO()
+            
+            # Create workbook directly
+            workbook = openpyxl.Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Transaction Report"
+            
+            current_row = 1
+            
+            # Add title
+            worksheet[f'A{current_row}'] = "Transaction Report"
+            worksheet[f'A{current_row}'].font = openpyxl.styles.Font(size=16, bold=True)
+            current_row += 2
+            
+            # Add generation info
+            worksheet[f'A{current_row}'] = "Generated At:"
+            worksheet[f'B{current_row}'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            current_row += 1
+            
+            # Add filters
+            worksheet[f'A{current_row}'] = "Applied Filters:"
+            worksheet[f'A{current_row}'].font = openpyxl.styles.Font(bold=True)
+            current_row += 1
+            
+            worksheet[f'A{current_row}'] = "Date:"
+            worksheet[f'B{current_row}'] = exact_date
+            current_row += 1
+            
+            if category_name:
+                worksheet[f'A{current_row}'] = "Category:"
+                worksheet[f'B{current_row}'] = category_name
+                current_row += 1
+            
+            if subcategory_name:
+                worksheet[f'A{current_row}'] = "Subcategory:"
+                worksheet[f'B{current_row}'] = subcategory_name
+                current_row += 1
+            
+            if branch_id:
+                worksheet[f'A{current_row}'] = "Branch ID:"
+                worksheet[f'B{current_row}'] = branch_id
+                current_row += 1
+            
+            if warehouse_id:
+                worksheet[f'A{current_row}'] = "Warehouse ID:"
+                worksheet[f'B{current_row}'] = warehouse_id
+                current_row += 1
+            
+            current_row += 1
+            worksheet[f'A{current_row}'] = "No transactions found for the specified filters."
+            worksheet[f'A{current_row}'].font = openpyxl.styles.Font(italic=True, color="FF0000")
+            
+            # Save workbook to BytesIO
+            workbook.save(output)
+            output.seek(0)
+            filename = f"transaction_report_{exact_date.replace('-', '_')}_empty.xlsx"
+            
+            return send_file(
+                output,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            
+        except Exception as e:
+            return create_error_response(f"Failed to create empty Excel file: {str(e)}", 500)
