@@ -526,16 +526,27 @@ class AssetSearch(Resource):
 @assets_ns.route("/bulk")
 class AssetBulkCreate(Resource):
     @assets_ns.doc('bulk_create_assets', security='Bearer Auth')
-    @assets_ns.expect([asset_input_model], description='List of assets to create')
+    @assets_ns.expect([api.model('AssetBulkInput', {
+        'name_ar': fields.String(required=True, description='Arabic name'),
+        'name_en': fields.String(required=True, description='English name'),
+        'product_code': fields.String(description='Product code'),
+        'category': fields.String(required=True, description='Category name (will be mapped to category_id)'),
+        'is_active': fields.Boolean(description='Active status (default: true)')
+    })], description='List of assets to create')
     @assets_ns.response(200, 'Bulk operation completed', bulk_create_result_model)
     @assets_ns.response(400, 'Invalid input data', error_model)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
     @jwt_required()
     def post(self):
-        """Bulk create multiple assets with detailed error reporting
+        """Bulk create multiple assets with category name mapping and automatic quantity setting
         
         First validates all assets, then adds only the valid ones to the database.
+        
+        Key features:
+        - Maps category names to category_id automatically
+        - Forces quantity to always be 0 regardless of input
+        - Provides detailed error reporting
         
         Returns a comprehensive report including:
         - Summary statistics (total, added, rejected, success rate)
@@ -562,6 +573,9 @@ class AssetBulkCreate(Resource):
             valid_assets = []
             rejected_assets = []
             
+            # Cache for category lookups to avoid repeated database queries
+            category_cache = {}
+            
             # Phase 1: Validate all assets without committing to database
             for index, asset_data in enumerate(request_data):
                 # Get asset name for reporting
@@ -572,8 +586,43 @@ class AssetBulkCreate(Resource):
                 )
                 
                 try:
+                    # Force quantity to always be 0
+                    asset_data_modified = asset_data.copy()
+                    asset_data_modified['quantity'] = 0
+                    
+                    # Handle category name to category_id mapping
+                    category_name = asset_data.get('category')
+                    if not category_name:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': ['Category name is required']
+                        })
+                        continue
+                    
+                    # Look up category_id from category name (with caching)
+                    if category_name not in category_cache:
+                        category = Category.query.filter_by(category=category_name).first()
+                        if category:
+                            category_cache[category_name] = category.id
+                        else:
+                            category_cache[category_name] = None
+                    
+                    category_id = category_cache[category_name]
+                    if category_id is None:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"Category '{category_name}' not found in database"]
+                        })
+                        continue
+                    
+                    # Replace category name with category_id for validation
+                    asset_data_modified['category_id'] = category_id
+                    del asset_data_modified['category']  # Remove category name from data
+                    
                     # Validate the asset data using schema
-                    validated_data = asset_schema.load(asset_data)
+                    validated_data = asset_schema.load(asset_data_modified)
                     
                     # Check for duplicate product_code in current batch
                     if validated_data.get('product_code'):
@@ -612,15 +661,6 @@ class AssetBulkCreate(Resource):
                             'asset_data': asset_data,
                             'asset_name': asset_name,
                             'errors': [f"English name '{validated_data['name_en']}' is duplicated in this batch"]
-                        })
-                        continue
-                    
-                    # Check if category exists in database
-                    if not db.session.get(Category, validated_data['category_id']):
-                        rejected_assets.append({
-                            'asset_data': asset_data,
-                            'asset_name': asset_name,
-                            'errors': [f"Invalid category ID '{validated_data['category_id']}' - category does not exist"]
                         })
                         continue
                     
@@ -929,9 +969,8 @@ class AssetBulkUpdate(Resource):
         'id': fields.Integer(required=True, description='Asset ID to update'),
         'name_ar': fields.String(description='Arabic name'),
         'name_en': fields.String(description='English name'),
-        'quantity': fields.Integer(description='Quantity'),
         'product_code': fields.String(description='Product code'),
-        'category_id': fields.Integer(description='Category ID'),
+        'category': fields.String(description='Category name (will be mapped to category_id)'),
         'is_active': fields.Boolean(description='Active status')
     })], description='List of assets to update')
     @assets_ns.response(200, 'Bulk update completed', bulk_update_result_model)
@@ -940,9 +979,14 @@ class AssetBulkUpdate(Resource):
     @assets_ns.response(403, 'Forbidden', error_model)
     @jwt_required()
     def put(self):
-        """Bulk update multiple assets with detailed error reporting
+        """Bulk update multiple assets with category name mapping and quantity preservation
         
         First validates all asset updates, then applies only the valid ones to the database.
+        
+        Key features:
+        - Maps category names to category_id automatically
+        - Preserves existing quantity (ignores any quantity input)
+        - Provides detailed error reporting
         
         Returns a comprehensive report including:
         - Summary statistics (total, updated, rejected, success rate)
@@ -968,6 +1012,9 @@ class AssetBulkUpdate(Resource):
             total_processed = len(request_data)
             valid_updates = []
             rejected_assets = []
+            
+            # Cache for category lookups to avoid repeated database queries
+            category_cache = {}
             
             # Phase 1: Validate all asset updates without committing to database
             for index, asset_data in enumerate(request_data):
@@ -999,8 +1046,35 @@ class AssetBulkUpdate(Resource):
                         })
                         continue
                     
+                    # Prepare update data - exclude ID and quantity
+                    update_data = {k: v for k, v in asset_data.items() if k not in ['id', 'quantity']}
+                    
+                    # Handle category name to category_id mapping if category is provided
+                    if 'category' in update_data:
+                        category_name = update_data['category']
+                        
+                        # Look up category_id from category name (with caching)
+                        if category_name not in category_cache:
+                            category = Category.query.filter_by(category=category_name).first()
+                            if category:
+                                category_cache[category_name] = category.id
+                            else:
+                                category_cache[category_name] = None
+                        
+                        category_id = category_cache[category_name]
+                        if category_id is None:
+                            rejected_assets.append({
+                                'asset_data': asset_data,
+                                'asset_name': asset_name,
+                                'errors': [f"Category '{category_name}' not found in database"]
+                            })
+                            continue
+                        
+                        # Replace category name with category_id
+                        update_data['category_id'] = category_id
+                        del update_data['category']
+                    
                     # Validate the asset data using schema (partial=True for updates)
-                    update_data = {k: v for k, v in asset_data.items() if k != 'id'}
                     validated_data = asset_schema.load(update_data, partial=True)
                     
                     # Check for duplicate product_code in current batch (excluding current asset)
@@ -1136,7 +1210,7 @@ class AssetBulkUpdate(Resource):
                         asset = update_info['asset']
                         validated_data = update_info['validated_data']
                         
-                        # Apply updates to the asset
+                        # Apply updates to the asset (quantity is preserved/not updated)
                         for key, value in validated_data.items():
                             setattr(asset, key, value)
                     
