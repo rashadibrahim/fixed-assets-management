@@ -16,8 +16,8 @@ class WarehouseSchema(Schema):
     branch_id = fields.Int()
     name_ar = fields.Str(required=True)
     name_en = fields.Str(required=True)
-    address_ar = fields.Str(required=True)
-    address_en = fields.Str(required=True)
+    address_ar = fields.Str()
+    address_en = fields.Str()
     
     @validates("branch_id")
     def validate_branch(self, value, **kwargs):

@@ -300,13 +300,18 @@ class AssetList(Resource):
     @assets_ns.response(500, 'Internal Server Error', error_model)
     @jwt_required()
     def post(self):
-        """Create a new fixed asset"""
+        """Create a new fixed asset with automatic product code generation"""
         error = check_permission("can_edit_asset")
         if error:
             return error
 
         try:
             data = asset_schema.load(request.get_json())
+            
+            # Generate product code if not provided
+            if not data.get('product_code'):
+                data['product_code'] = generate_unique_product_code()
+            
             new_asset = FixedAsset(**data)
             db.session.add(new_asset)
             db.session.commit()
@@ -337,7 +342,7 @@ class AssetBarcode(Resource):
     @assets_ns.response(404, 'Asset not found', error_model)
     @jwt_required()
     def get(self, asset_id):
-        """Generate a barcode for a specific asset"""
+        """Generate and return a barcode for a specific asset (display purposes only)"""
         error = check_permission("can_print_barcode")
         if error:
             return error
@@ -347,12 +352,12 @@ class AssetBarcode(Resource):
         if not asset:
             return create_error_response("Asset not found", 404)
             
-        # Check if asset has a product code, if not generate one
+        # Asset should already have a product code from creation, but double-check
         if not asset.product_code:
             asset.product_code = generate_unique_product_code()
             db.session.commit()
             
-        # Generate barcode
+        # Generate barcode for display/printing
         barcode_data = generate_barcode(asset.product_code)
         return barcode_data
 
@@ -529,7 +534,7 @@ class AssetBulkCreate(Resource):
     @assets_ns.expect([api.model('AssetBulkInput', {
         'name_ar': fields.String(required=True, description='Arabic name'),
         'name_en': fields.String(required=True, description='English name'),
-        'product_code': fields.String(description='Product code'),
+        'product_code': fields.String(description='Product code (auto-generated if not provided)'),
         'category': fields.String(required=True, description='Category name (will be mapped to category_id)'),
         'is_active': fields.Boolean(description='Active status (default: true)')
     })], description='List of assets to create')
@@ -539,13 +544,14 @@ class AssetBulkCreate(Resource):
     @assets_ns.response(403, 'Forbidden', error_model)
     @jwt_required()
     def post(self):
-        """Bulk create multiple assets with category name mapping and automatic quantity setting
+        """Bulk create multiple assets with automatic product code generation and category name mapping
         
         First validates all assets, then adds only the valid ones to the database.
         
         Key features:
         - Maps category names to category_id automatically
         - Forces quantity to always be 0 regardless of input
+        - Auto-generates unique product codes if not provided
         - Provides detailed error reporting
         
         Returns a comprehensive report including:
@@ -575,6 +581,8 @@ class AssetBulkCreate(Resource):
             
             # Cache for category lookups to avoid repeated database queries
             category_cache = {}
+            # Set to track generated product codes in this batch
+            generated_codes = set()
             
             # Phase 1: Validate all assets without committing to database
             for index, asset_data in enumerate(request_data):
@@ -589,6 +597,22 @@ class AssetBulkCreate(Resource):
                     # Force quantity to always be 0
                     asset_data_modified = asset_data.copy()
                     asset_data_modified['quantity'] = 0
+                    
+                    # Generate product code if not provided
+                    if not asset_data_modified.get('product_code'):
+                        # Generate unique code that's not in database or current batch
+                        while True:
+                            new_code = generate_unique_product_code()
+                            # Check if code exists in database
+                            existing_in_db = FixedAsset.query.filter_by(product_code=new_code).first()
+                            # Check if code exists in current batch
+                            if not existing_in_db and new_code not in generated_codes:
+                                asset_data_modified['product_code'] = new_code
+                                generated_codes.add(new_code)
+                                break
+                    else:
+                        # If product code is provided, add it to our tracking set
+                        generated_codes.add(asset_data_modified['product_code'])
                     
                     # Handle category name to category_id mapping
                     category_name = asset_data.get('category')
@@ -625,18 +649,17 @@ class AssetBulkCreate(Resource):
                     validated_data = asset_schema.load(asset_data_modified)
                     
                     # Check for duplicate product_code in current batch
-                    if validated_data.get('product_code'):
-                        existing_in_batch = any(
-                            asset.get('product_code') == validated_data['product_code'] 
-                            for asset in valid_assets
-                        )
-                        if existing_in_batch:
-                            rejected_assets.append({
-                                'asset_data': asset_data,
-                                'asset_name': asset_name,
-                                'errors': [f"Product code '{validated_data['product_code']}' is duplicated in this batch"]
-                            })
-                            continue
+                    existing_in_batch = any(
+                        asset.get('product_code') == validated_data['product_code'] 
+                        for asset in valid_assets
+                    )
+                    if existing_in_batch:
+                        rejected_assets.append({
+                            'asset_data': asset_data,
+                            'asset_name': asset_name,
+                            'errors': [f"Product code '{validated_data['product_code']}' is duplicated in this batch"]
+                        })
+                        continue
                     
                     # Check for duplicate names in current batch
                     name_ar_duplicate = any(
@@ -665,10 +688,7 @@ class AssetBulkCreate(Resource):
                         continue
                     
                     # Check for existing records in database
-                    existing_product_code = None
-                    if validated_data.get('product_code'):
-                        existing_product_code = FixedAsset.query.filter_by(product_code=validated_data['product_code']).first()
-                    
+                    existing_product_code = FixedAsset.query.filter_by(product_code=validated_data['product_code']).first()
                     existing_name_ar = FixedAsset.query.filter_by(name_ar=validated_data['name_ar']).first()
                     existing_name_en = FixedAsset.query.filter_by(name_en=validated_data['name_en']).first()
                     

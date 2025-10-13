@@ -12,7 +12,7 @@ class Branch(db.Model):
     address_ar = db.Column(db.String(500), nullable=False)
     address_en = db.Column(db.String(500), nullable=False)
 
-    warehouses = db.relationship("Warehouse", back_populates="branch", cascade="all, delete-orphan")
+    warehouses = db.relationship("Warehouse", back_populates="branch")  # Removed cascade
 
     def __repr__(self):
         return f"<Branch {self.id} {self.name_en or self.name_ar}>"
@@ -21,14 +21,14 @@ class Branch(db.Model):
 class Warehouse(db.Model):
     __tablename__ = "warehouses"
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="CASCADE"), nullable=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="RESTRICT"), nullable=True)
     name_ar = db.Column(db.String(255), nullable=False, unique=True)
     name_en = db.Column(db.String(255), nullable=False, unique=True)
     address_ar = db.Column(db.String(500), nullable=False)
     address_en = db.Column(db.String(500), nullable=False)
 
     branch = db.relationship("Branch", back_populates="warehouses")
-    transactions = db.relationship("Transaction", back_populates="warehouse", cascade="all, delete-orphan")
+    transactions = db.relationship("Transaction", back_populates="warehouse")  # Removed cascade
 
     def __repr__(self):
         return f"<Warehouse {self.id} {self.name_en or self.name_ar}>"
@@ -41,7 +41,7 @@ class Category(db.Model):
     subcategory = db.Column(db.String(100), nullable=True)
     
     # Relationship with FixedAsset
-    assets = db.relationship("FixedAsset", back_populates="category_rel", cascade="all, delete-orphan")
+    assets = db.relationship("FixedAsset", back_populates="category_rel")  # Removed cascade
 
     def __repr__(self):
         return f"<Category {self.category} - {self.subcategory}>"
@@ -59,7 +59,7 @@ class FixedAsset(db.Model):
 
     # New relationship with Category
     category_rel = db.relationship("Category", back_populates="assets")
-    asset_transactions = db.relationship("AssetTransaction", back_populates="asset", cascade="all, delete-orphan")
+    asset_transactions = db.relationship("AssetTransaction", back_populates="asset")  # Removed cascade
 
     def __repr__(self):
         return f"<FixedAsset {self.id} {self.name_en or self.name_ar}>"
@@ -81,7 +81,7 @@ class Transaction(db.Model):
     # Relationships
     warehouse = db.relationship("Warehouse", back_populates="transactions")
     user = db.relationship("User", back_populates="transactions")  # NEW: Relationship to User
-    asset_transactions = db.relationship("AssetTransaction", back_populates="transaction", cascade="all, delete-orphan")
+    asset_transactions = db.relationship("AssetTransaction", back_populates="transaction", cascade="all, delete-orphan")  # Keep cascade for AssetTransaction as it's a dependent entity
 
     def __repr__(self):
         return f"<Transaction {self.custom_id} - {self.description[:50]}>"
@@ -106,7 +106,7 @@ class Transaction(db.Model):
 class AssetTransaction(db.Model):
     __tablename__ = "asset_transactions"
     id = db.Column(db.Integer, primary_key=True)
-    transaction_id = db.Column(db.Integer, db.ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False)
+    transaction_id = db.Column(db.Integer, db.ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False)  # Keep cascade as this is dependent
     asset_id = db.Column(db.Integer, db.ForeignKey("fixed_assets.id", ondelete="RESTRICT"), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
     amount = db.Column(Numeric(10, 2), nullable=True)  # Using Numeric for monetary values
@@ -118,8 +118,6 @@ class AssetTransaction(db.Model):
 
     def __repr__(self):
         return f"<AssetTransaction {self.id} - Asset:{self.asset_id} Qty:{self.quantity} Total:{self.total_value}>"
-
-
 
     def calculate_total_value(self):
         """Calculate and update total_value based on quantity * amount"""
