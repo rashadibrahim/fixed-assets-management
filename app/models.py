@@ -9,8 +9,8 @@ class Branch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name_ar = db.Column(db.String(255), nullable=False, unique=True)
     name_en = db.Column(db.String(255), nullable=False, unique=True)
-    address_ar = db.Column(db.String(500), nullable=False)
-    address_en = db.Column(db.String(500), nullable=False)
+    address_ar = db.Column(db.String(500), nullable=True)
+    address_en = db.Column(db.String(500), nullable=True)
 
     warehouses = db.relationship("Warehouse", back_populates="branch")  # Removed cascade
 
@@ -21,11 +21,11 @@ class Branch(db.Model):
 class Warehouse(db.Model):
     __tablename__ = "warehouses"
     id = db.Column(db.Integer, primary_key=True)
-    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="RESTRICT"), nullable=True)
+    branch_id = db.Column(db.Integer, db.ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False)
     name_ar = db.Column(db.String(255), nullable=False, unique=True)
     name_en = db.Column(db.String(255), nullable=False, unique=True)
-    address_ar = db.Column(db.String(500), nullable=False)
-    address_en = db.Column(db.String(500), nullable=False)
+    address_ar = db.Column(db.String(500), nullable=True)
+    address_en = db.Column(db.String(500), nullable=True)
 
     branch = db.relationship("Branch", back_populates="warehouses")
     transactions = db.relationship("Transaction", back_populates="warehouse")  # Removed cascade

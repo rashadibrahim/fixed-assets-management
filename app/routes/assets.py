@@ -224,9 +224,14 @@ class CategoryResource(Resource):
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
     @categories_ns.response(404, 'Category not found', error_model)
+    @categories_ns.response(409, 'Conflict - Cannot delete referenced category', error_model)
     @jwt_required()
     def delete(self, category_id):
-        """Delete a category"""
+        """Delete a category
+        
+        Cannot delete a category if it has associated assets.
+        All assets must be deleted or moved to another category first.
+        """
         error = check_permission("can_delete_asset")
         if error:
             return error
@@ -236,12 +241,30 @@ class CategoryResource(Resource):
             return create_error_response("Category not found", 404)
 
         try:
+            # Check if category has associated assets
+            asset_count = len(category.assets)
+            if asset_count > 0:
+                asset_names = [a.name_en or a.name_ar for a in category.assets[:3]]  # Get first 3 asset names
+                asset_list = ", ".join(asset_names)
+                
+                if asset_count > 3:
+                    asset_list += f" and {asset_count - 3} more"
+                
+                return create_error_response(
+                    f"Cannot delete category: it has {asset_count} associated asset(s) ({asset_list}). "
+                    f"Please delete or reassign these assets first.", 
+                    409
+                )
+            
             db.session.delete(category)
             db.session.commit()
-            return {"message": f"Category {category_id} deleted successfully"}
+            return {"message": f"Category '{category.category}' deleted successfully"}
+        except IntegrityError as e:
+            db.session.rollback()
+            return create_error_response("Cannot delete category: it is referenced by other records in the system", 409)
         except Exception as e:
             db.session.rollback()
-            return create_error_response("Cannot delete category with associated assets", 400)
+            return create_error_response("An unexpected error occurred while deleting the category", 500)
 
 @assets_ns.route("/")
 class AssetList(Resource):

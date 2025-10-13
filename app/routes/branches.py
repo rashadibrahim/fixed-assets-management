@@ -258,7 +258,11 @@ class BranchResource(Resource):
     @branches_ns.response(503, 'Service Unavailable', error_model)
     @jwt_required()
     def delete(self, branch_id):
-        """Delete a specific branch by ID"""
+        """Delete a specific branch by ID
+        
+        Cannot delete a branch if it has associated warehouses.
+        All warehouses must be deleted or moved to another branch first.
+        """
         error = check_permission("can_delete_branch")
         if error:
             return error
@@ -267,14 +271,29 @@ class BranchResource(Resource):
             branch = db.session.query(Branch).filter_by(id=branch_id).first()
             if not branch:
                 return create_error_response("Branch not found", 404)
+            
+            # Check if branch has associated warehouses
+            warehouse_count = len(branch.warehouses)
+            if warehouse_count > 0:
+                warehouse_names = [w.name_en or w.name_ar for w in branch.warehouses[:3]]  # Get first 3 warehouse names
+                warehouse_list = ", ".join(warehouse_names)
+                
+                if warehouse_count > 3:
+                    warehouse_list += f" and {warehouse_count - 3} more"
+                
+                return create_error_response(
+                    f"Cannot delete branch: it has {warehouse_count} associated warehouse(s) ({warehouse_list}). "
+                    f"Please delete or reassign these warehouses first.", 
+                    409
+                )
                 
             db.session.delete(branch)
             db.session.commit()
-            return {"message": f"Branch {branch_id} deleted successfully"}, 200
+            return {"message": f"Branch '{branch.name_en or branch.name_ar}' deleted successfully"}, 200
         except IntegrityError as e:
             db.session.rollback()
             logging.error(f"Integrity error deleting branch {branch_id}: {str(e)}")
-            return create_error_response("Cannot delete branch: it may be referenced by warehouses or other records", 409)
+            return create_error_response("Cannot delete branch: it is referenced by other records in the system", 409)
         except OperationalError as e:
             db.session.rollback()
             logging.error(f"Database operational error deleting branch {branch_id}: {str(e)}")
