@@ -29,8 +29,9 @@ class WarehouseSchema(Schema):
 class CategorySchema(Schema):
     id = fields.Int(dump_only=True)
     category = fields.Str(required=True)
+    category_ar = fields.Str(required=False, allow_none=True)
     subcategory = fields.Str(required=False, allow_none=True)
-
+    subcategory_ar = fields.Str(required=False, allow_none=True)
 
 class FixedAssetSchema(Schema):
     id = fields.Int(dump_only=True)

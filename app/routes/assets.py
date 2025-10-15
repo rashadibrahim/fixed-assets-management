@@ -78,7 +78,7 @@ class CategoryList(Resource):
     @categories_ns.marshal_with(pagination_model)
     @categories_ns.param('page', 'Page number', type=int, default=1)
     @categories_ns.param('per_page', 'Items per page', type=int, default=10)
-    @categories_ns.param('search', 'Search in category or subcategory names', type=str)
+    @categories_ns.param('search', 'Search in category or subcategory names (English/Arabic)', type=str)
     @categories_ns.param('subcategory', 'Filter by subcategory name', type=str)
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
@@ -86,8 +86,8 @@ class CategoryList(Resource):
     def get(self):
         """Get all categories with pagination and optional search/filtering
         
-        - search: Searches in both category and subcategory fields
-        - subcategory: Filters by specific subcategory name
+        - search: Searches in both English and Arabic category and subcategory fields
+        - subcategory: Filters by specific subcategory name (English or Arabic)
         """
         error = check_permission("can_read_asset")
         if error:
@@ -100,19 +100,27 @@ class CategoryList(Resource):
 
         query = Category.query
         
-        # Apply search filter if provided (searches in both category and subcategory)
+        # Apply search filter if provided (searches in both English and Arabic fields)
         if search:
             search_pattern = f"%{search}%"
             query = query.filter(
                 or_(
                     Category.category.ilike(search_pattern),
-                    Category.subcategory.ilike(search_pattern)
+                    Category.category_ar.ilike(search_pattern),
+                    Category.subcategory.ilike(search_pattern),
+                    Category.subcategory_ar.ilike(search_pattern)
                 )
             )
         
-        # Apply subcategory filter if provided
+        # Apply subcategory filter if provided (searches in both English and Arabic)
         if subcategory_filter:
-            query = query.filter(Category.subcategory.ilike(f"%{subcategory_filter}%"))
+            subcategory_pattern = f"%{subcategory_filter}%"
+            query = query.filter(
+                or_(
+                    Category.subcategory.ilike(subcategory_pattern),
+                    Category.subcategory_ar.ilike(subcategory_pattern)
+                )
+            )
 
         # Order results by ID descending for consistent ordering
         query = query.order_by(Category.id.desc())
@@ -219,8 +227,7 @@ class CategoryResource(Resource):
             return create_error_response("An unexpected error occurred while updating the category", 500)
 
     @categories_ns.doc('delete_category', security='Bearer Auth')
-    @categories_ns.marshal_with(success_model)
-    @categories_ns.response(400, 'Cannot delete category', error_model)
+    @assets_ns.response(200, 'Successfully deleted asset', success_model)
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
     @categories_ns.response(404, 'Category not found', error_model)
@@ -258,7 +265,7 @@ class CategoryResource(Resource):
             
             db.session.delete(category)
             db.session.commit()
-            return {"message": f"Category '{category.category}' deleted successfully"}
+            return {"message": f"Category '{category.category}' deleted successfully"}, 200
         except IntegrityError as e:
             db.session.rollback()
             return create_error_response("Cannot delete category: it is referenced by other records in the system", 409)
@@ -1333,7 +1340,7 @@ class AssetBulkUpdate(Resource):
 class AssetExcelExport(Resource):
     @assets_ns.doc('export_assets_excel', security='Bearer Auth')
     @assets_ns.param('category_id', 'Filter assets by category ID', type=int)
-    @assets_ns.param('subcategory', 'Filter assets by subcategory name', type=str)
+    @assets_ns.param('subcategory', 'Filter assets by subcategory name (English or Arabic)', type=str)
     @assets_ns.response(200, 'Successfully generated Excel export')
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
@@ -1348,7 +1355,7 @@ class AssetExcelExport(Resource):
         
         Optional filters:
         - category_id: Filter by specific category ID
-        - subcategory: Filter by subcategory name (case-insensitive partial match)
+        - subcategory: Filter by subcategory name (English or Arabic, case-insensitive partial match)
         """
         error = check_permission("can_read_asset")
         if error:
@@ -1371,7 +1378,13 @@ class AssetExcelExport(Resource):
                 applied_filters['Category ID'] = category_id
             
             if subcategory:
-                query = query.join(Category).filter(Category.subcategory.ilike(f"%{subcategory}%"))
+                # Updated to search in both English and Arabic subcategory fields
+                query = query.join(Category).filter(
+                    or_(
+                        Category.subcategory.ilike(f"%{subcategory}%"),
+                        Category.subcategory_ar.ilike(f"%{subcategory}%")
+                    )
+                )
                 applied_filters['Subcategory'] = subcategory
             
             # Order by ID for consistent output
@@ -1398,20 +1411,20 @@ class AssetExcelExport(Resource):
             worksheet = workbook.active
             worksheet.title = "Assets Export"
             
-            # Set column widths - removed created_at and updated_at columns
+            # Set column widths - updated to exclude subcategory fields
             worksheet.column_dimensions['A'].width = 10   # ID
             worksheet.column_dimensions['B'].width = 25   # Name AR
             worksheet.column_dimensions['C'].width = 25   # Name EN
             worksheet.column_dimensions['D'].width = 15   # Product Code
             worksheet.column_dimensions['E'].width = 12   # Quantity
-            worksheet.column_dimensions['F'].width = 20   # Category
-            worksheet.column_dimensions['G'].width = 20   # Subcategory
+            worksheet.column_dimensions['F'].width = 20   # Category EN
+            worksheet.column_dimensions['G'].width = 20   # Category AR
             worksheet.column_dimensions['H'].width = 12   # Is Active
             
             current_row = 1
             
             # Add title
-            worksheet.merge_cells(f'A{current_row}:H{current_row}')  # Changed from J to H
+            worksheet.merge_cells(f'A{current_row}:H{current_row}')
             title_cell = worksheet[f'A{current_row}']
             title_cell.value = "Assets Export"
             title_cell.font = openpyxl.styles.Font(size=16, bold=True)
@@ -1442,10 +1455,10 @@ class AssetExcelExport(Resource):
             worksheet[f'A{current_row}'].font = openpyxl.styles.Font(bold=True)
             current_row += 2
             
-            # Add data table headers - removed created_at and updated_at
+            # Add data table headers - updated to exclude subcategory fields
             headers = [
                 'ID', 'Name (Arabic)', 'Name (English)', 'Product Code', 
-                'Quantity', 'Category', 'Subcategory', 'Active'
+                'Quantity', 'Category (English)', 'Category (Arabic)', 'Active'
             ]
             
             header_row = current_row
@@ -1465,15 +1478,15 @@ class AssetExcelExport(Resource):
             for asset in assets:
                 # Get category info by querying the Category table directly
                 category_name = ''
-                subcategory_name = ''
+                category_name_ar = ''
                 
                 if asset.category_id:
                     category = db.session.get(Category, asset.category_id)
                     if category:
                         category_name = category.category or ''
-                        subcategory_name = category.subcategory or ''
+                        category_name_ar = category.category_ar or ''
                 
-                # Removed created_at and updated_at from row_data
+                # Updated row_data to exclude subcategory fields
                 row_data = [
                     asset.id,
                     asset.name_ar or '',
@@ -1481,7 +1494,7 @@ class AssetExcelExport(Resource):
                     asset.product_code or '',
                     asset.quantity or 0,
                     category_name,
-                    subcategory_name,
+                    category_name_ar,
                     'Yes' if asset.is_active else 'No'
                 ]
                 

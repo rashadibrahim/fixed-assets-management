@@ -38,7 +38,9 @@ class Category(db.Model):
     __tablename__ = "categories"
     id = db.Column(db.Integer, primary_key=True)
     category = db.Column(db.String(100), unique=True, nullable=False)
+    category_ar = db.Column(db.String(100), nullable=True)
     subcategory = db.Column(db.String(100), nullable=True)
+    subcategory_ar = db.Column(db.String(100), nullable=True)
     
     # Relationship with FixedAsset
     assets = db.relationship("FixedAsset", back_populates="category_rel")  # Removed cascade

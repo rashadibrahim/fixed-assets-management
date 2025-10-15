@@ -71,13 +71,17 @@ branch_input_model = api.model('BranchInput', {
 # Category models
 category_model = api.model('Category', {
     'id': fields.Integer(readonly=True, description='Category unique identifier'),
-    'category': fields.String(required=True, description='Asset category'),
-    'subcategory': fields.String(required=True, description='Asset subcategory')
+    'category': fields.String(required=True, description='Asset category (English)'),
+    'category_ar': fields.String(description='Asset category (Arabic)'),
+    'subcategory': fields.String(description='Asset subcategory (English)'),
+    'subcategory_ar': fields.String(description='Asset subcategory (Arabic)')
 })
 
 category_input_model = api.model('CategoryInput', {
-    'category': fields.String(required=True, description='Asset category'),
-    'subcategory': fields.String(required=True, description='Asset subcategory')
+    'category': fields.String(required=True, description='Asset category (English)'),
+    'category_ar': fields.String(description='Asset category (Arabic)'),
+    'subcategory': fields.String(description='Asset subcategory (English)'),
+    'subcategory_ar': fields.String(description='Asset subcategory (Arabic)')
 })
 
 # Fixed Asset models
