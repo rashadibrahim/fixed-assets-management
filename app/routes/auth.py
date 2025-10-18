@@ -114,8 +114,8 @@ class Register(Resource):
     @auth_ns.response(400, 'Bad Request', error_model)
     @auth_ns.response(409, 'Conflict - Email already exists', error_model)
     @auth_ns.response(500, 'Internal Server Error', error_model)
-    # @jwt_required()
-    # @admin_required
+    @jwt_required()
+    @admin_required
     def post(self):
         """Register a new user (alternative endpoint)"""
         # Validate request body

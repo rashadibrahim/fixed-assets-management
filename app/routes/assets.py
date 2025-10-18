@@ -75,7 +75,8 @@ bulk_update_result_model = api.model('BulkUpdateResult', {
 @categories_ns.route("/")
 class CategoryList(Resource):
     @categories_ns.doc('list_categories', security='Bearer Auth')
-    @categories_ns.marshal_with(pagination_model)
+    #@categories_ns.marshal_with(pagination_model)
+    
     @categories_ns.param('page', 'Page number', type=int, default=1)
     @categories_ns.param('per_page', 'Items per page', type=int, default=10)
     @categories_ns.param('search', 'Search in category or subcategory names (English/Arabic)', type=str)
@@ -131,11 +132,11 @@ class CategoryList(Resource):
             "total": paginated.total,
             "page": paginated.page,
             "pages": paginated.pages
-        }
+        }, 200
 
     @categories_ns.doc('create_category', security='Bearer Auth')
     @categories_ns.expect(category_input_model)
-    @categories_ns.marshal_with(category_model, code=201)
+    #@categories_ns.marshal_with(category_model, code=201)
     @categories_ns.response(400, 'Validation Error', error_model)
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
@@ -171,7 +172,7 @@ class CategoryList(Resource):
 @categories_ns.route("/<int:category_id>")
 class CategoryResource(Resource):
     @categories_ns.doc('get_category', security='Bearer Auth')
-    @categories_ns.marshal_with(category_model)
+    #@categories_ns.marshal_with(category_model)
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
     @categories_ns.response(404, 'Category not found', error_model)
@@ -185,11 +186,11 @@ class CategoryResource(Resource):
         category = db.session.get(Category, category_id)
         if not category:
             return create_error_response("Category not found", 404)
-        return category_schema.dump(category)
+        return category_schema.dump(category), 200
 
     @categories_ns.doc('update_category', security='Bearer Auth')
     @categories_ns.expect(category_input_model)
-    @categories_ns.marshal_with(category_model)
+    #@categories_ns.marshal_with(category_model)
     @categories_ns.response(400, 'Validation Error', error_model)
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
@@ -211,7 +212,7 @@ class CategoryResource(Resource):
             for key, value in data.items():
                 setattr(category, key, value)
             db.session.commit()
-            return category_schema.dump(category)
+            return category_schema.dump(category), 200
         except ValidationError as err:
             return create_validation_error_response(err.messages)
         except IntegrityError as e:
@@ -276,23 +277,23 @@ class CategoryResource(Resource):
 @assets_ns.route("/")
 class AssetList(Resource):
     @assets_ns.doc('list_assets', security='Bearer Auth')
-    @assets_ns.marshal_with(pagination_model)
+    #@assets_ns.marshal_with(pagination_model)
     @assets_ns.param('page', 'Page number', type=int, default=1)
     @assets_ns.param('per_page', 'Items per page', type=int, default=10)
     @assets_ns.param('category_id', 'Filter assets by category ID', type=int)
     @assets_ns.param('subcategory', 'Filter assets by subcategory name', type=str)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
-    # @jwt_required()
+    @jwt_required()
     def get(self):
         """Get all fixed assets with pagination and optional category/subcategory filtering
         
         - category_id: Filter by specific category ID
         - subcategory: Filter by subcategory name (case-insensitive partial match)
         """
-        # error = check_permission("can_read_asset")
-        # if error:
-        #     return error
+        error = check_permission("can_read_asset")
+        if error:
+            return error
 
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 10, type=int)
@@ -319,11 +320,11 @@ class AssetList(Resource):
             "total": paginated.total,
             "page": paginated.page,
             "pages": paginated.pages
-        }
+        }, 200
     
     @assets_ns.doc('create_asset', security='Bearer Auth')
     @assets_ns.expect(asset_input_model)
-    @assets_ns.marshal_with(asset_model, code=201)
+    #@assets_ns.marshal_with(asset_model, code=201)
     @assets_ns.response(400, 'Validation Error', error_model)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
@@ -366,7 +367,7 @@ class AssetList(Resource):
 @assets_ns.route("/<int:asset_id>/barcode")
 class AssetBarcode(Resource):
     @assets_ns.doc('get_asset_barcode', security='Bearer Auth')
-    @assets_ns.marshal_with(barcode_model, code=200, description='Successfully generated barcode')
+    #@assets_ns.marshal_with(barcode_model, code=200, description='Successfully generated barcode')
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
     @assets_ns.response(404, 'Asset not found', error_model)
@@ -389,14 +390,14 @@ class AssetBarcode(Resource):
             
         # Generate barcode for display/printing
         barcode_data = generate_barcode(asset.product_code)
-        return barcode_data
+        return barcode_data, 200
 
 
 
 @assets_ns.route("/<int:asset_id>")
 class AssetResource(Resource):
     @assets_ns.doc('get_asset', security='Bearer Auth')
-    @assets_ns.marshal_with(asset_model)
+    #@assets_ns.marshal_with(asset_model)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
     @assets_ns.response(404, 'Asset not found', error_model)
@@ -410,11 +411,11 @@ class AssetResource(Resource):
         asset = db.session.get(FixedAsset, asset_id)
         if not asset:
             return create_error_response("Asset not found", 404)
-        return asset_schema.dump(asset)
+        return asset_schema.dump(asset), 200
 
     @assets_ns.doc('update_asset', security='Bearer Auth')
     @assets_ns.expect(asset_input_model)
-    @assets_ns.marshal_with(asset_model)
+    # @assets_ns.marshal_with(asset_model)
     @assets_ns.response(400, 'Validation Error', error_model)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
@@ -436,7 +437,7 @@ class AssetResource(Resource):
             for key, value in data.items():
                 setattr(asset, key, value)
             db.session.commit()
-            return asset_schema.dump(asset)
+            return asset_schema.dump(asset), 200
         except ValidationError as err:
             return create_validation_error_response(err.messages)
         except IntegrityError as e:
@@ -454,7 +455,7 @@ class AssetResource(Resource):
             return create_error_response("An unexpected error occurred while updating the asset", 500)
 
     @assets_ns.doc('delete_asset', security='Bearer Auth')
-    @assets_ns.marshal_with(success_model)
+    #@assets_ns.marshal_with(success_model)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
     @assets_ns.response(404, 'Asset not found', error_model)
@@ -471,7 +472,7 @@ class AssetResource(Resource):
 
         db.session.delete(asset)
         db.session.commit()
-        return {"message": f"Asset {asset_id} deleted successfully"}
+        return {"message": f"Asset {asset_id} deleted successfully"}, 200
 
 
 
@@ -482,7 +483,7 @@ class AssetSearch(Resource):
     @assets_ns.param('q', 'Search query (text for name search or number for barcode search)', required=True, type=str)
     @assets_ns.param('page', 'Page number', type=int, default=1)
     @assets_ns.param('per_page', 'Items per page', type=int, default=10)
-    @assets_ns.marshal_with(asset_search_response_model)
+    #@assets_ns.marshal_with(asset_search_response_model)
     @assets_ns.response(400, 'Missing Search Query', error_model)
     @assets_ns.response(401, 'Unauthorized', error_model)
     @assets_ns.response(403, 'Forbidden', error_model)
@@ -539,7 +540,7 @@ class AssetSearch(Resource):
                     "total": 0,
                     "page": page,
                     "pages": 0
-                }
+                }, 200
             
             # Order results by ID descending for consistent ordering
             query = query.order_by(FixedAsset.id.desc())
@@ -552,7 +553,7 @@ class AssetSearch(Resource):
                 "total": paginated.total,
                 "page": paginated.page,
                 "pages": paginated.pages
-            }
+            }, 200
             
         except Exception as e:
             print(f"Search error: {str(e)}")
@@ -838,7 +839,7 @@ class CategoryBulkCreate(Resource):
     @categories_ns.response(400, 'Invalid input data', error_model)
     @categories_ns.response(401, 'Unauthorized', error_model)
     @categories_ns.response(403, 'Forbidden', error_model)
-    # @jwt_required()
+    @jwt_required()
     def post(self):
         """Bulk create multiple categories with detailed error reporting
         
@@ -849,9 +850,9 @@ class CategoryBulkCreate(Resource):
         - List of successfully added categories
         - List of rejected categories with detailed error information
         """
-        # error = check_permission("can_edit_asset")
-        # if error:
-        #     return error
+        error = check_permission("can_edit_asset")
+        if error:
+            return error
 
         try:
             # Get the request data
