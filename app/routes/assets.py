@@ -237,8 +237,11 @@ class CategoryResource(Resource):
     def delete(self, category_id):
         """Delete a category
         
-        Cannot delete a category if it has associated assets.
-        All assets must be deleted or moved to another category first.
+        Cannot delete a category if:
+        - It has associated assets
+        - It is referenced as a main category by other categories
+        
+        All assets and dependent categories must be deleted or moved first.
         """
         error = check_permission("can_delete_asset")
         if error:
@@ -261,6 +264,22 @@ class CategoryResource(Resource):
                 return create_error_response(
                     f"Cannot delete category: it has {asset_count} associated asset(s) ({asset_list}). "
                     f"Please delete or reassign these assets first.", 
+                    409
+                )
+            
+            # Check if this category is referenced as a main category by other categories
+            # This checks if the current category's name is used as a main category reference
+            dependent_categories = Category.query.filter(
+                Category.subcategory == category.category
+            ).all()
+            
+            if dependent_categories:
+                dependent_count = len(dependent_categories)
+                
+                return create_error_response(
+                    f"Cannot delete category '{category.category}': it is referenced as a main category by "
+                    f"{dependent_count} other categor{'y' if dependent_count == 1 else 'ies'}. "
+                    f"Please delete or reassign these categories first.", 
                     409
                 )
             
