@@ -31,5 +31,5 @@ class Config:
     # Ensure upload directory exists
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     
-    print(f"Config loaded - User: {DB_USER}, Host: {DB_HOST}, Port: {DB_PORT}, DB: {DB_NAME}")
-    print(f"Database URI: postgresql://***:***@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+    # print(f"Config loaded - User: {DB_USER}, Host: {DB_HOST}, Port: {DB_PORT}, DB: {DB_NAME}")
+    # print(f"Database URI: postgresql://***:***@{DB_HOST}:{DB_PORT}/{DB_NAME}")
