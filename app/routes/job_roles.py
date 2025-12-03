@@ -85,26 +85,22 @@ class JobRoleList(Resource):
         except ValidationError as err:
             return create_validation_error_response(err.messages)
 
-        # Validate required fields
-        if "name" not in json_data:
-            return create_error_response("Missing required field: name", 400, "name")
-
         try:
             # Create new job description
             job_desc = JobDescription(
-                name=json_data["name"],
-                can_read_branch=json_data.get("can_read_branch", False),
-                can_edit_branch=json_data.get("can_edit_branch", False),
-                can_delete_branch=json_data.get("can_delete_branch", False),
-                can_read_warehouse=json_data.get("can_read_warehouse", False),
-                can_edit_warehouse=json_data.get("can_edit_warehouse", False),
-                can_delete_warehouse=json_data.get("can_delete_warehouse", False),
-                can_read_asset=json_data.get("can_read_asset", False),
-                can_edit_asset=json_data.get("can_edit_asset", False),
-                can_delete_asset=json_data.get("can_delete_asset", False),
-                can_print_barcode=json_data.get("can_print_barcode", False),
-                can_make_report=json_data.get("can_make_report", False),
-                can_make_transaction=json_data.get("can_make_transaction", False),
+                name=data["name"],
+                can_read_branch=data["can_read_branch"],
+                can_edit_branch=data["can_edit_branch"],
+                can_delete_branch=data["can_delete_branch"],
+                can_read_warehouse=data["can_read_warehouse"],
+                can_edit_warehouse=data["can_edit_warehouse"],
+                can_delete_warehouse=data["can_delete_warehouse"],
+                can_read_asset=data["can_read_asset"],
+                can_edit_asset=data["can_edit_asset"],
+                can_delete_asset=data["can_delete_asset"],
+                can_print_barcode=data["can_print_barcode"],
+                can_make_report=data["can_make_report"],
+                can_make_transaction=data["can_make_transaction"],
             )
 
             db.session.add(job_desc)

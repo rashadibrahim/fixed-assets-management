@@ -31,6 +31,7 @@ with app.app_context():
         exit(1)
 
 # Helpful shell context for `flask shell` or when using python manage.py shell
+# Trigger reload
 @app.shell_context_processor
 def make_shell_context():
     return {"db": db, "Branch": Branch, "Warehouse": Warehouse, "FixedAsset": FixedAsset}
