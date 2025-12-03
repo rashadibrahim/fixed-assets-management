@@ -133,48 +133,44 @@ def ensure_schema_updated(db, app):
             logging.error(f"Failed to update database schema: {e}")
             return False
 
-def setup_database(config, db):
-    """One function to handle everything database-related"""
+def create_database_if_not_exists():
+    """
+    Check if the configured database exists, and create it if it doesn't.
+    Connects to the default 'postgres' database to perform this check.
+    """
+    from config import Config
     
-    # Step 1: Create database if it doesn't exist
-    try:
-        temp_url = URL.create(
-            config['DATABASE_DRIVER_NAME'],
-            username=config['DATABASE_USERNAME'],
-            password=config['DATABASE_PASSWORD'],
-            host=config['DATABASE_HOST'],
-            port=config['DATABASE_PORT']
-        )
-        
-        temp_engine = create_engine(temp_url)
-        with temp_engine.connect() as conn:
-            conn.execute(text("COMMIT"))
-            try:
-                conn.execute(text(f"CREATE DATABASE {config['DATABASE_NAME']}"))
-                print(f"✅ Database '{config['DATABASE_NAME']}' created")
-            except:
-                print(f"✅ Database '{config['DATABASE_NAME']}' already exists")
+    db_name = Config.DB_NAME
     
-    except Exception as e:
-        print(f"❌ Database creation error: {e}")
-    
-    # Step 2: Create engine with full URL
-    db_url = URL.create(
-        config['DATABASE_DRIVER_NAME'],
-        username=config['DATABASE_USERNAME'],
-        password=config['DATABASE_PASSWORD'],
-        host=config['DATABASE_HOST'],
-        database=config['DATABASE_NAME'],
-        port=config['DATABASE_PORT']
+    # Connect to default 'postgres' database to check/create target db
+    default_url = URL.create(
+        drivername="postgresql+psycopg2",
+        username=Config.DB_USER,
+        password=Config.DB_PASSWORD,
+        host=Config.DB_HOST,
+        port=Config.DB_PORT,
+        database="postgres"
     )
     
-    engine = create_engine(db_url)
-    
-    # Step 3: Create all tables
     try:
-        db.metadata.create_all(engine)
-        print("✅ All tables created successfully")
+        engine = create_engine(default_url)
+        # Use isolation_level="AUTOCOMMIT" to allow CREATE DATABASE
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            # Check if database exists
+            result = conn.execute(text(f"SELECT 1 FROM pg_database WHERE datname = '{db_name}'"))
+            if not result.scalar():
+                logger.info(f"Database {db_name} does not exist. Creating...")
+                conn.execute(text(f"CREATE DATABASE {db_name}"))
+                logger.info(f"Database {db_name} created successfully.")
+            else:
+                logger.info(f"Database {db_name} already exists.")
     except Exception as e:
-        print(f"❌ Table creation error: {e}")
-    
-    return engine
+        logger.error(f"Error checking/creating database: {e}")
+        # We proceed, as the error might be because we can't connect to 'postgres' db,
+        # but maybe the target db already exists and is accessible.
+
+def setup_database(config, db):
+    """One function to handle everything database-related"""
+    # This function seems to be legacy or using a different config structure.
+    # Keeping it for now but create_database_if_not_exists is preferred for the new flow.
+    pass

@@ -1,6 +1,7 @@
 from app import create_app, db
 from flask_migrate import Migrate
 from app.models import Branch, Warehouse, FixedAsset
+from app.db_init import create_database_if_not_exists
 import logging
 
 # Configure logging
@@ -8,6 +9,9 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+# Ensure database exists before creating app
+create_database_if_not_exists()
 
 # Create app using the factory in app/__init__.py
 app = create_app()

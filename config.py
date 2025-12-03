@@ -15,12 +15,13 @@ class Config:
     DB_NAME = 'fixed_assets_management_db'
     DB_USER = 'belal'
     DB_PASSWORD = 'belal'  # Your actual password here
-    LOCAL_URL = f"sqlite:///fixed_assets.db"  #"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    # LOCAL_URL = f"sqlite:///fixed_assets.db"  #"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    POSTGRES_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
     JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwt-secret-key")
     # Build the database URI directly
-    DB_URL = os.environ.get("DATABASE_URL", LOCAL_URL)
+    DB_URL = os.environ.get("DATABASE_URL", POSTGRES_URL)
     # SQLALCHEMY_DATABASE_URI = DB_URL
-    SQLALCHEMY_DATABASE_URI = LOCAL_URL
+    SQLALCHEMY_DATABASE_URI = DB_URL
     
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
